@@ -587,8 +587,18 @@ def build_progress_stats(
     topic_by_id = {topic["id"]: topic for topic in topics}
     tasks_by_id = {task["task_id"]: task for task in tasks}
 
-    total_tasks = len(tasks)
-    answered_tasks = len([task for task in tasks if task.get("status") == "answered"])
+    valid_tasks = [
+        task for task in tasks
+        if task.get("status") != "bad_task"
+    ]
+
+    bad_tasks_count = len(tasks) - len(valid_tasks)
+
+    total_tasks = len(valid_tasks)
+    answered_tasks = len([
+        task for task in valid_tasks
+        if task.get("status") == "answered"
+    ])
 
     verdict_counts = {
         "correct": 0,
@@ -597,7 +607,13 @@ def build_progress_stats(
         "unknown": 0,
     }
 
-    for answer in answers:
+    valid_task_ids = {task["task_id"] for task in valid_tasks}
+    valid_answers = [
+        answer for answer in answers
+        if answer.get("task_id") in valid_task_ids
+    ]
+
+    for answer in valid_answers:
         verdict = normalize_verdict(answer.get("verdict", "unknown"))
         if verdict not in verdict_counts:
             verdict = "unknown"
@@ -615,17 +631,22 @@ def build_progress_stats(
                 "title": topic_title,
                 "total": 0,
                 "answered": 0,
+                "bad_tasks": 0,
                 "correct": 0,
                 "partial": 0,
                 "incorrect": 0,
             }
+
+        if task.get("status") == "bad_task":
+            topic_stats[topic_id]["bad_tasks"] += 1
+            continue
 
         topic_stats[topic_id]["total"] += 1
 
         if task.get("status") == "answered":
             topic_stats[topic_id]["answered"] += 1
 
-    for answer in answers:
+    for answer in valid_answers:
         task = tasks_by_id.get(answer["task_id"])
         if not task:
             continue
@@ -646,8 +667,9 @@ def build_progress_stats(
     return {
         "total_tasks": total_tasks,
         "answered_tasks": answered_tasks,
+        "bad_tasks_count": bad_tasks_count,
         "sessions_count": len(sessions),
-        "answers_count": len(answers),
+        "answers_count": len(valid_answers),
         "verdict_counts": verdict_counts,
         "topic_stats": topic_stats,
     }
