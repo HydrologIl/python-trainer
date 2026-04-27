@@ -83,6 +83,7 @@ def get_worksheet(name: str) -> gspread.Worksheet:
     return spreadsheet.worksheet(name)
 
 
+@st.cache_data(ttl=60)
 def load_topics() -> list[dict[str, Any]]:
     worksheet = get_worksheet(TOPICS_SHEET_NAME)
     records = worksheet.get_all_records()
@@ -123,6 +124,7 @@ def update_topic(topic: dict[str, Any], learned_date: str, status: str) -> None:
     st.cache_resource.clear()
 
 
+@st.cache_data(ttl=60)
 def load_sessions() -> list[dict[str, Any]]:
     worksheet = get_worksheet(SESSIONS_SHEET_NAME)
     records = worksheet.get_all_records()
@@ -160,6 +162,7 @@ def update_session_status(session: dict[str, Any], status: str, completed_at: st
     worksheet.update_cell(row_number, 7, status)
 
 
+@st.cache_data(ttl=60)
 def load_tasks() -> list[dict[str, Any]]:
     worksheet = get_worksheet(TASKS_SHEET_NAME)
     records = worksheet.get_all_records()
@@ -200,6 +203,7 @@ def update_task_status(task: dict[str, Any], status: str) -> None:
     worksheet.update_cell(row_number, 10, status)
 
 
+@st.cache_data(ttl=60)
 def load_answers() -> list[dict[str, Any]]:
     worksheet = get_worksheet(ANSWERS_SHEET_NAME)
     records = worksheet.get_all_records()
@@ -248,6 +252,7 @@ def save_answer(
         value_input_option="USER_ENTERED",
     )
 
+    st.cache_data.clear()
     return answer_id
 
 
@@ -277,6 +282,8 @@ def save_mistake(
         ],
         value_input_option="USER_ENTERED",
     )
+
+    st.cache_data.clear()
 
 
 def find_session(
@@ -344,6 +351,7 @@ def create_session(
         value_input_option="USER_ENTERED",
     )
 
+    st.cache_data.clear()
     return session_id
 
 
@@ -377,6 +385,7 @@ def save_generated_tasks(
         )
 
     worksheet.append_rows(rows, value_input_option="USER_ENTERED")
+    st.cache_data.clear()
 
 
 def get_repetition_info(topic: dict[str, Any], today: date) -> dict[str, Any] | None:
@@ -838,6 +847,7 @@ with st.sidebar:
         st.rerun()
 
     if st.button("Перечитать Google Sheet"):
+        st.cache_data.clear()
         st.cache_resource.clear()
         reset_session()
         st.rerun()
@@ -850,7 +860,7 @@ try:
     topics = load_topics()
 except Exception as e:
     st.error("Не удалось прочитать Google Sheet.")
-    st.write("Проверь GOOGLE_SHEET_ID, gcp_service_account в Streamlit secrets и доступ Editor для service account.")
+    st.write("Если видишь 429 quota exceeded — это лимит чтения Google Sheets. Подожди 1–2 минуты и нажми «Перечитать Google Sheet». В этой версии чтение кэшируется на 60 секунд.")
     st.code(str(e))
     st.stop()
 
