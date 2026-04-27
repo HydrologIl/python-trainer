@@ -493,11 +493,15 @@ def render_active_session(
             st.caption(f"Вердикт: {latest_answer.get('verdict', 'unknown')}")
             st.markdown(latest_answer["gemini_feedback"])
 
+    answer_key = f"answer_input_{current_task['task_id']}"
+
+    if answer_key not in st.session_state:
+        st.session_state[answer_key] = ""
+
     user_answer = st.text_area(
         "Твой ответ",
-        value=st.session_state.get("user_answer", ""),
         height=260,
-        key="answer_input",
+        key=answer_key,
         disabled=current_task.get("status") in ["answered", "bad_task"],
     )
 
