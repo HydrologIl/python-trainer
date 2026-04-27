@@ -1,0 +1,304 @@
+import json
+import random
+import time
+from typing import Any
+
+import streamlit as st
+from google import genai
+
+from curriculum import GENERAL_CURRICULUM, STAGE_0_CURRICULUM
+
+
+FALLBACK_MODELS = [
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+]
+
+
+def normalize_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def normalize_verdict(value: str) -> str:
+    value = normalize_cell(value).lower()
+
+    if value in ["correct", "корректно", "правильно"]:
+        return "correct"
+
+    if value in ["partially_correct", "partial", "частично корректно", "частично"]:
+        return "partially_correct"
+
+    if value in ["incorrect", "некорректно", "неправильно"]:
+        return "incorrect"
+
+    return value or "unknown"
+
+
+def infer_verdict_from_text(text: str) -> str:
+    lowered = text.lower()
+
+    if "частично" in lowered:
+        return "partially_correct"
+
+    if "некоррект" in lowered or "неправ" in lowered or "ошиб" in lowered:
+        return "incorrect"
+
+    if "коррект" in lowered or "правиль" in lowered:
+        return "correct"
+
+    return "unknown"
+
+
+def get_api_key() -> str | None:
+    return st.secrets.get("GEMINI_API_KEY")
+
+
+def get_gemini_client() -> genai.Client | None:
+    api_key = get_api_key()
+
+    if not api_key:
+        return None
+
+    return genai.Client(api_key=api_key)
+
+
+def call_gemini_with_retry(prompt: str, models: list[str] | None = None) -> str:
+    client = get_gemini_client()
+
+    if client is None:
+        raise RuntimeError(
+            "Не найден GEMINI_API_KEY в Streamlit secrets. "
+            "Добавь его в настройках приложения."
+        )
+
+    model_list = models or FALLBACK_MODELS
+    last_error = None
+
+    for model in model_list:
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                )
+                return response.text
+            except Exception as e:
+                last_error = e
+                message = str(e)
+
+                is_overload = (
+                    "503" in message
+                    or "UNAVAILABLE" in message
+                    or "overloaded" in message.lower()
+                    or "high demand" in message.lower()
+                )
+
+                if not is_overload:
+                    raise
+
+                sleep_seconds = min(12, (2 ** attempt) + random.uniform(0, 1.5))
+                time.sleep(sleep_seconds)
+
+    raise RuntimeError(
+        "Gemini сейчас перегружен или недоступен после нескольких попыток. "
+        "Попробуй позже. Последняя ошибка: "
+        f"{last_error}"
+    )
+
+
+def build_task_generation_prompt(
+    topic: dict[str, Any],
+    repetition_day: int,
+    task_feedback_context: str = "Пока нет сохранённых жалоб на задачи.",
+) -> str:
+    known_blocks = ", ".join(str(block) for block in topic.get("known_blocks", []))
+
+    return f"""
+Ты — эксперт по Python для анализа данных и опытный преподаватель.
+
+Твоя задача — сгенерировать учебные задачи для повторения по кривой Эббингауза.
+
+Контекст верхнеуровневой программы курса:
+{GENERAL_CURRICULUM}
+
+Детальная программа этапа 0:
+{STAGE_0_CURRICULUM}
+
+Текущая тема:
+{topic["stage"]}, блок {topic["block"]}: {topic["title"]}
+
+Краткое описание темы:
+{topic["description"]}
+
+Студент уже прошёл блоки:
+{known_blocks}
+
+День повторения:
+{repetition_day}
+
+Журнал жалоб пользователя на ранее сгенерированные задачи. Это дефекты генерации, а не ошибки пользователя.
+Используй этот журнал как анти-примеры и не повторяй такие проблемы:
+{task_feedback_context}
+
+Сгенерируй ровно 40 задач:
+- 10 задач на исправление ошибок;
+- 10 задач формата "что выведет код?";
+- 20 задач на написание кода.
+
+Требования:
+- задачи должны проверять именно текущую тему;
+- для решения должны требоваться только знания из уже пройденных блоков;
+- не давай подсказок в условиях;
+- не давай решений;
+- не добавляй комментарии-подсказки в код;
+- задачи должны быть уникальными;
+- где уместно, используй контекст реальных данных: продажи, маркетинг, HR, финансы, списки клиентов, файлы, простая аналитика;
+- формулировки должны быть понятными и короткими;
+- язык — русский;
+- для задач типа "debug" в коде ОБЯЗАНА быть реальная ошибка;
+- для задач типа "debug" условие НЕ ДОЛЖНО говорить, что код неправильный, если код уже корректен;
+- для задач типа "debug" перед выдачей задачи мысленно проверь, что ошибка действительно существует;
+- для задач типа "output_prediction" код должен быть корректным и исполняемым, если задача не просит найти ошибку.
+
+Верни строго валидный JSON без markdown-блока и без пояснений.
+
+Формат JSON:
+[
+  {{
+    "id": 1,
+    "type": "debug",
+    "difficulty": "начальный",
+    "task": "Текст условия",
+    "code": "код, если он нужен для задачи"
+  }},
+  {{
+    "id": 11,
+    "type": "output_prediction",
+    "difficulty": "начальный",
+    "task": "Что выведет код?",
+    "code": "код для анализа"
+  }},
+  {{
+    "id": 21,
+    "type": "write_code",
+    "difficulty": "начальный",
+    "task": "Напиши код...",
+    "code": ""
+  }}
+]
+"""
+
+
+def build_feedback_prompt(
+    task: dict[str, Any],
+    user_answer: str,
+    topic: dict[str, Any],
+) -> str:
+    code_part = task.get("code", "")
+
+    return f"""
+Ты проверяешь решение учебной задачи по Python.
+
+Текущая тема:
+{topic["stage"]}, блок {topic["block"]}: {topic["title"]}
+
+Тип задачи:
+{task.get("type")}
+
+Условие задачи:
+{task.get("task")}
+
+Код из условия, если есть:
+```python
+{code_part}
+```
+
+Ответ пользователя:
+```python
+{user_answer}
+```
+
+Проверь ответ.
+
+Правила обратной связи:
+- пиши на русском;
+- будь конкретным;
+- не растекайся;
+- если решение почти верное, не переписывай весь код, дай точечную правку;
+- если решение неверное, объясни ошибку и дай маленькую подсказку;
+- если это задача "что выведет код?", проверь не только результат, но и ход рассуждения;
+- если это задача на исправление ошибок, проверь, исправлена ли исходная проблема.
+
+Верни строго валидный JSON без markdown-блока и без пояснений.
+
+Формат JSON:
+{{
+  "verdict": "correct | partially_correct | incorrect",
+  "feedback": "Текст обратной связи на русском языке",
+  "mistake_type": "короткий тип ошибки, например missing_return, wrong_loop_condition, syntax_error, no_mistake",
+  "mistake_summary": "короткое описание ошибки или пустая строка"
+}}
+"""
+
+
+def extract_json_from_gemini(text: str) -> Any:
+    clean_text = text.strip()
+
+    if clean_text.startswith("```json"):
+        clean_text = clean_text.removeprefix("```json").strip()
+
+    if clean_text.startswith("```"):
+        clean_text = clean_text.removeprefix("```").strip()
+
+    if clean_text.endswith("```"):
+        clean_text = clean_text.removesuffix("```").strip()
+
+    return json.loads(clean_text)
+
+
+def extract_feedback_json(text: str) -> dict[str, str]:
+    try:
+        parsed = extract_json_from_gemini(text)
+        return {
+            "verdict": normalize_verdict(parsed.get("verdict", "")),
+            "feedback": normalize_cell(parsed.get("feedback", text)),
+            "mistake_type": normalize_cell(parsed.get("mistake_type", "")),
+            "mistake_summary": normalize_cell(parsed.get("mistake_summary", "")),
+        }
+    except Exception:
+        return {
+            "verdict": infer_verdict_from_text(text),
+            "feedback": text,
+            "mistake_type": "",
+            "mistake_summary": "",
+        }
+
+
+def generate_tasks(
+    topic: dict[str, Any],
+    repetition_day: int,
+    task_feedback_context: str = "Пока нет сохранённых жалоб на задачи.",
+) -> list[dict[str, Any]]:
+    response_text = call_gemini_with_retry(
+        build_task_generation_prompt(
+            topic,
+            repetition_day,
+            task_feedback_context,
+        ),
+        models=FALLBACK_MODELS,
+    )
+    return extract_json_from_gemini(response_text)
+
+
+def get_feedback_json(
+    task: dict[str, Any],
+    user_answer: str,
+    topic: dict[str, Any],
+) -> dict[str, str]:
+    response_text = call_gemini_with_retry(
+        build_feedback_prompt(task, user_answer, topic),
+        models=FALLBACK_MODELS,
+    )
+    return extract_feedback_json(response_text)
