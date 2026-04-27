@@ -1,5 +1,6 @@
 import json
 import random
+import re
 import time
 import uuid
 from datetime import date, datetime, timedelta
@@ -23,6 +24,8 @@ FALLBACK_MODELS = [
 TOPICS_SHEET_NAME = "topics"
 SESSIONS_SHEET_NAME = "sessions"
 TASKS_SHEET_NAME = "tasks"
+ANSWERS_SHEET_NAME = "answers"
+MISTAKES_SHEET_NAME = "mistakes"
 
 
 def now_iso() -> str:
@@ -148,6 +151,15 @@ def load_sessions() -> list[dict[str, Any]]:
     return sessions
 
 
+def update_session_status(session: dict[str, Any], status: str, completed_at: str = "") -> None:
+    worksheet = get_worksheet(SESSIONS_SHEET_NAME)
+    row_number = session["row_number"]
+
+    # F = completed_at, G = status
+    worksheet.update_cell(row_number, 6, completed_at)
+    worksheet.update_cell(row_number, 7, status)
+
+
 def load_tasks() -> list[dict[str, Any]]:
     worksheet = get_worksheet(TASKS_SHEET_NAME)
     records = worksheet.get_all_records()
@@ -180,7 +192,98 @@ def load_tasks() -> list[dict[str, Any]]:
     return tasks
 
 
-def find_session(topic_id: str, repetition_day: int, scheduled_date: str) -> dict[str, Any] | None:
+def update_task_status(task: dict[str, Any], status: str) -> None:
+    worksheet = get_worksheet(TASKS_SHEET_NAME)
+    row_number = task["row_number"]
+
+    # J = status
+    worksheet.update_cell(row_number, 10, status)
+
+
+def load_answers() -> list[dict[str, Any]]:
+    worksheet = get_worksheet(ANSWERS_SHEET_NAME)
+    records = worksheet.get_all_records()
+
+    answers = []
+
+    for index, record in enumerate(records, start=2):
+        answer_id = normalize_cell(record.get("answer_id"))
+
+        if not answer_id:
+            continue
+
+        answers.append(
+            {
+                "row_number": index,
+                "answer_id": answer_id,
+                "task_id": normalize_cell(record.get("task_id")),
+                "user_answer": normalize_cell(record.get("user_answer")),
+                "gemini_feedback": normalize_cell(record.get("gemini_feedback")),
+                "verdict": normalize_cell(record.get("verdict")),
+                "created_at": normalize_cell(record.get("created_at")),
+            }
+        )
+
+    return answers
+
+
+def save_answer(
+    task: dict[str, Any],
+    user_answer: str,
+    feedback: str,
+    verdict: str,
+) -> str:
+    answer_id = f"answer_{uuid.uuid4().hex[:12]}"
+
+    worksheet = get_worksheet(ANSWERS_SHEET_NAME)
+    worksheet.append_row(
+        [
+            answer_id,
+            task["task_id"],
+            user_answer,
+            feedback,
+            verdict,
+            now_iso(),
+        ],
+        value_input_option="USER_ENTERED",
+    )
+
+    return answer_id
+
+
+def save_mistake(
+    topic: dict[str, Any],
+    task: dict[str, Any],
+    mistake_type: str,
+    mistake_summary: str,
+) -> None:
+    if not mistake_summary and not mistake_type:
+        return
+
+    if normalize_verdict(mistake_type) == "correct":
+        return
+
+    mistake_id = f"mistake_{uuid.uuid4().hex[:12]}"
+
+    worksheet = get_worksheet(MISTAKES_SHEET_NAME)
+    worksheet.append_row(
+        [
+            mistake_id,
+            topic["id"],
+            task["task_id"],
+            mistake_type,
+            mistake_summary,
+            now_iso(),
+        ],
+        value_input_option="USER_ENTERED",
+    )
+
+
+def find_session(
+    topic_id: str,
+    repetition_day: int,
+    scheduled_date: str,
+) -> dict[str, Any] | None:
     sessions = load_sessions()
 
     for session in sessions:
@@ -196,11 +299,35 @@ def find_session(topic_id: str, repetition_day: int, scheduled_date: str) -> dic
 
 
 def get_tasks_for_session(session_id: str) -> list[dict[str, Any]]:
-    tasks = [task for task in load_tasks() if task["session_id"] == session_id]
+    tasks = [
+        task
+        for task in load_tasks()
+        if task["session_id"] == session_id
+    ]
     return sorted(tasks, key=lambda task: task["order"])
 
 
-def create_session(topic_id: str, repetition_day: int, scheduled_date: str) -> str:
+def get_answers_by_task_id() -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {}
+
+    for answer in load_answers():
+        result.setdefault(answer["task_id"], []).append(answer)
+
+    return result
+
+
+def get_first_unanswered_index(tasks: list[dict[str, Any]]) -> int:
+    for index, task in enumerate(tasks):
+        if task.get("status") != "answered":
+            return index
+    return len(tasks)
+
+
+def create_session(
+    topic_id: str,
+    repetition_day: int,
+    scheduled_date: str,
+) -> str:
     session_id = f"session_{uuid.uuid4().hex[:12]}"
 
     worksheet = get_worksheet(SESSIONS_SHEET_NAME)
@@ -220,7 +347,12 @@ def create_session(topic_id: str, repetition_day: int, scheduled_date: str) -> s
     return session_id
 
 
-def save_generated_tasks(session_id: str, topic: dict[str, Any], repetition_day: int, generated_tasks: list[dict[str, Any]]) -> None:
+def save_generated_tasks(
+    session_id: str,
+    topic: dict[str, Any],
+    repetition_day: int,
+    generated_tasks: list[dict[str, Any]],
+) -> None:
     worksheet = get_worksheet(TASKS_SHEET_NAME)
 
     rows = []
@@ -336,7 +468,10 @@ def call_gemini_with_retry(prompt: str, models: list[str] | None = None) -> str:
     for model in model_list:
         for attempt in range(3):
             try:
-                response = client.models.generate_content(model=model, contents=prompt)
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                )
                 return response.text
             except Exception as e:
                 last_error = e
@@ -469,15 +604,19 @@ def build_feedback_prompt(task: dict[str, Any], user_answer: str, topic: dict[st
 - если это задача "что выведет код?", проверь не только результат, но и ход рассуждения;
 - если это задача на исправление ошибок, проверь, исправлена ли исходная проблема.
 
-Ответь в формате:
-1. Вердикт: корректно / частично корректно / некорректно.
-2. Что хорошо.
-3. Что исправить.
-4. Мини-подсказка или следующий шаг.
+Верни строго валидный JSON без markdown-блока и без пояснений.
+
+Формат JSON:
+{{
+  "verdict": "correct | partially_correct | incorrect",
+  "feedback": "Текст обратной связи на русском языке",
+  "mistake_type": "короткий тип ошибки, например missing_return, wrong_loop_condition, syntax_error, no_mistake",
+  "mistake_summary": "короткое описание ошибки или пустая строка"
+}}
 """
 
 
-def extract_json_from_gemini(text: str) -> list[dict[str, Any]]:
+def extract_json_from_gemini(text: str) -> Any:
     clean_text = text.strip()
 
     if clean_text.startswith("```json"):
@@ -492,6 +631,54 @@ def extract_json_from_gemini(text: str) -> list[dict[str, Any]]:
     return json.loads(clean_text)
 
 
+def extract_feedback_json(text: str) -> dict[str, str]:
+    try:
+        parsed = extract_json_from_gemini(text)
+        return {
+            "verdict": normalize_verdict(parsed.get("verdict", "")),
+            "feedback": normalize_cell(parsed.get("feedback", text)),
+            "mistake_type": normalize_cell(parsed.get("mistake_type", "")),
+            "mistake_summary": normalize_cell(parsed.get("mistake_summary", "")),
+        }
+    except Exception:
+        return {
+            "verdict": infer_verdict_from_text(text),
+            "feedback": text,
+            "mistake_type": "",
+            "mistake_summary": "",
+        }
+
+
+def normalize_verdict(value: str) -> str:
+    value = normalize_cell(value).lower()
+
+    if value in ["correct", "корректно", "правильно"]:
+        return "correct"
+
+    if value in ["partially_correct", "partial", "частично корректно", "частично"]:
+        return "partially_correct"
+
+    if value in ["incorrect", "некорректно", "неправильно"]:
+        return "incorrect"
+
+    return value or "unknown"
+
+
+def infer_verdict_from_text(text: str) -> str:
+    lowered = text.lower()
+
+    if "частично" in lowered:
+        return "partially_correct"
+
+    if "некоррект" in lowered or "неправ" in lowered or "ошиб" in lowered:
+        return "incorrect"
+
+    if "коррект" in lowered or "правиль" in lowered:
+        return "correct"
+
+    return "unknown"
+
+
 def generate_tasks(topic: dict[str, Any], repetition_day: int) -> list[dict[str, Any]]:
     response_text = call_gemini_with_retry(
         build_task_generation_prompt(topic, repetition_day),
@@ -500,8 +687,12 @@ def generate_tasks(topic: dict[str, Any], repetition_day: int) -> list[dict[str,
     return extract_json_from_gemini(response_text)
 
 
-def get_feedback(task: dict[str, Any], user_answer: str, topic: dict[str, Any]) -> str:
-    return call_gemini_with_retry(build_feedback_prompt(task, user_answer, topic), models=FALLBACK_MODELS)
+def get_feedback_json(task: dict[str, Any], user_answer: str, topic: dict[str, Any]) -> dict[str, str]:
+    response_text = call_gemini_with_retry(
+        build_feedback_prompt(task, user_answer, topic),
+        models=FALLBACK_MODELS,
+    )
+    return extract_feedback_json(response_text)
 
 
 def reset_session() -> None:
@@ -512,6 +703,7 @@ def reset_session() -> None:
         "selected_topic_id",
         "selected_repetition_day",
         "last_feedback",
+        "last_verdict",
         "user_answer",
         "answer_input",
     ]:
@@ -521,11 +713,13 @@ def reset_session() -> None:
 
 def load_session_into_state(session: dict[str, Any]) -> None:
     tasks = get_tasks_for_session(session["session_id"])
+    current_index = get_first_unanswered_index(tasks)
 
     st.session_state["current_session_id"] = session["session_id"]
     st.session_state["tasks"] = tasks
-    st.session_state["current_task_index"] = 0
+    st.session_state["current_task_index"] = current_index
     st.session_state["last_feedback"] = ""
+    st.session_state["last_verdict"] = ""
     st.session_state["user_answer"] = ""
 
 
@@ -539,7 +733,10 @@ def render_task(task: dict[str, Any], index: int, total: int) -> None:
     task_type = task_type_labels.get(task.get("type"), task.get("type", "Задача"))
 
     st.markdown(f"### Задача {index + 1} из {total}")
-    st.caption(f"{task_type} · сложность: {task.get('difficulty', 'не указана')}")
+    st.caption(
+        f"{task_type} · сложность: {task.get('difficulty', 'не указана')} · "
+        f"статус: {task.get('status', 'new')}"
+    )
 
     st.write(task.get("task", ""))
 
@@ -547,10 +744,85 @@ def render_task(task: dict[str, Any], index: int, total: int) -> None:
         st.code(task["code"], language="python")
 
 
+def build_progress_stats(
+    topics: list[dict[str, Any]],
+    sessions: list[dict[str, Any]],
+    tasks: list[dict[str, Any]],
+    answers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    topic_by_id = {topic["id"]: topic for topic in topics}
+    tasks_by_id = {task["task_id"]: task for task in tasks}
+
+    total_tasks = len(tasks)
+    answered_tasks = len([task for task in tasks if task.get("status") == "answered"])
+
+    verdict_counts = {
+        "correct": 0,
+        "partially_correct": 0,
+        "incorrect": 0,
+        "unknown": 0,
+    }
+
+    for answer in answers:
+        verdict = normalize_verdict(answer.get("verdict", "unknown"))
+        if verdict not in verdict_counts:
+            verdict = "unknown"
+        verdict_counts[verdict] += 1
+
+    topic_stats: dict[str, dict[str, Any]] = {}
+
+    for task in tasks:
+        topic_id = task["topic_id"]
+        topic = topic_by_id.get(topic_id)
+        topic_title = topic["title"] if topic else topic_id
+
+        if topic_id not in topic_stats:
+            topic_stats[topic_id] = {
+                "title": topic_title,
+                "total": 0,
+                "answered": 0,
+                "correct": 0,
+                "partial": 0,
+                "incorrect": 0,
+            }
+
+        topic_stats[topic_id]["total"] += 1
+
+        if task.get("status") == "answered":
+            topic_stats[topic_id]["answered"] += 1
+
+    for answer in answers:
+        task = tasks_by_id.get(answer["task_id"])
+        if not task:
+            continue
+
+        topic_id = task["topic_id"]
+        verdict = normalize_verdict(answer.get("verdict", "unknown"))
+
+        if topic_id not in topic_stats:
+            continue
+
+        if verdict == "correct":
+            topic_stats[topic_id]["correct"] += 1
+        elif verdict == "partially_correct":
+            topic_stats[topic_id]["partial"] += 1
+        elif verdict == "incorrect":
+            topic_stats[topic_id]["incorrect"] += 1
+
+    return {
+        "total_tasks": total_tasks,
+        "answered_tasks": answered_tasks,
+        "sessions_count": len(sessions),
+        "answers_count": len(answers),
+        "verdict_counts": verdict_counts,
+        "topic_stats": topic_stats,
+    }
+
+
 st.set_page_config(page_title="Python Trainer", page_icon="🐍", layout="centered")
 
 st.title("Python Trainer")
-st.write("Google Sheets как база тем, сессий и задач + проверка через Gemini.")
+st.write("Google Sheets как база тем, сессий, задач, ответов и фидбека.")
 
 with st.sidebar:
     st.header("Настройки")
@@ -582,7 +854,9 @@ except Exception as e:
     st.code(str(e))
     st.stop()
 
-tab_today, tab_plan, tab_sessions = st.tabs(["Сегодня", "Учебный план", "Сессии"])
+tab_today, tab_plan, tab_sessions, tab_progress = st.tabs(
+    ["Сегодня", "Учебный план", "Сессии", "Прогресс"]
+)
 
 with tab_plan:
     st.header("Учебный план")
@@ -616,16 +890,27 @@ with tab_plan:
         }[value],
     )
 
-    default_date = parse_date(current_learned_date) if current_learned_date else today_value
+    default_date = (
+        parse_date(current_learned_date)
+        if current_learned_date
+        else today_value
+    )
 
-    learned_date_input = st.date_input("Дата изучения темы", value=default_date)
+    learned_date_input = st.date_input(
+        "Дата изучения темы",
+        value=default_date,
+    )
 
     col_a, col_b = st.columns(2)
 
     with col_a:
         if st.button("Сохранить дату и статус"):
             try:
-                update_topic(selected_topic_for_edit, learned_date_input.isoformat(), status)
+                update_topic(
+                    selected_topic_for_edit,
+                    learned_date_input.isoformat(),
+                    status,
+                )
                 reset_session()
                 st.success("Сохранено в Google Sheets.")
                 st.rerun()
@@ -636,7 +921,11 @@ with tab_plan:
     with col_b:
         if st.button("Отметить как пройденную сегодня"):
             try:
-                update_topic(selected_topic_for_edit, today_value.isoformat(), "active")
+                update_topic(
+                    selected_topic_for_edit,
+                    today_value.isoformat(),
+                    "active",
+                )
                 reset_session()
                 st.success("Тема отмечена как пройденная сегодня.")
                 st.rerun()
@@ -660,24 +949,77 @@ with tab_sessions:
     try:
         sessions = load_sessions()
         tasks = load_tasks()
+        answers = load_answers()
 
         if not sessions:
             st.info("Сессий пока нет.")
         else:
+            answers_by_task_id = get_answers_by_task_id()
+
             for session in sorted(sessions, key=lambda s: s["started_at"], reverse=True):
-                session_tasks = [task for task in tasks if task["session_id"] == session["session_id"]]
+                session_tasks = [
+                    task for task in tasks
+                    if task["session_id"] == session["session_id"]
+                ]
+                answered_count = len([
+                    task for task in session_tasks
+                    if task.get("status") == "answered"
+                ])
 
                 topic_title = next(
-                    (topic["title"] for topic in topics if topic["id"] == session["topic_id"]),
+                    (
+                        topic["title"]
+                        for topic in topics
+                        if topic["id"] == session["topic_id"]
+                    ),
                     session["topic_id"],
                 )
 
                 st.write(
                     f"**{topic_title}** — день {session['repetition_day']} — "
-                    f"{session['scheduled_date']} — {len(session_tasks)} задач — статус `{session['status']}`"
+                    f"{session['scheduled_date']} — "
+                    f"{answered_count}/{len(session_tasks)} задач — статус `{session['status']}`"
                 )
     except Exception as e:
         st.error("Не удалось прочитать сессии.")
+        st.code(str(e))
+
+with tab_progress:
+    st.header("Прогресс")
+
+    try:
+        sessions = load_sessions()
+        tasks = load_tasks()
+        answers = load_answers()
+        stats = build_progress_stats(topics, sessions, tasks, answers)
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Сессий", stats["sessions_count"])
+        col2.metric("Задач решено", f"{stats['answered_tasks']}/{stats['total_tasks']}")
+        col3.metric("Ответов сохранено", stats["answers_count"])
+
+        verdict_counts = stats["verdict_counts"]
+
+        st.subheader("Качество ответов")
+        col_a, col_b, col_c, col_d = st.columns(4)
+        col_a.metric("Корректно", verdict_counts["correct"])
+        col_b.metric("Частично", verdict_counts["partially_correct"])
+        col_c.metric("Некорректно", verdict_counts["incorrect"])
+        col_d.metric("Неясно", verdict_counts["unknown"])
+
+        st.subheader("По темам")
+
+        for topic_stat in stats["topic_stats"].values():
+            st.write(
+                f"**{topic_stat['title']}** — "
+                f"решено {topic_stat['answered']}/{topic_stat['total']}; "
+                f"корректно: {topic_stat['correct']}, "
+                f"частично: {topic_stat['partial']}, "
+                f"ошибки: {topic_stat['incorrect']}"
+            )
+
+    except Exception as e:
+        st.error("Не удалось построить прогресс.")
         st.code(str(e))
 
 with tab_today:
@@ -730,12 +1072,23 @@ with tab_today:
         st.session_state["selected_topic_id"] = selected_topic["id"]
         st.session_state["selected_repetition_day"] = selected_repetition_day
 
-    existing_session = find_session(selected_topic["id"], selected_repetition_day, scheduled_date)
+    existing_session = find_session(
+        selected_topic["id"],
+        selected_repetition_day,
+        scheduled_date,
+    )
 
     if existing_session and not st.session_state.get("tasks"):
         existing_tasks = get_tasks_for_session(existing_session["session_id"])
+        answered_count = len([
+            task for task in existing_tasks
+            if task.get("status") == "answered"
+        ])
 
-        st.success(f"Для этой темы и даты уже есть сохранённая сессия: {len(existing_tasks)} задач.")
+        st.success(
+            f"Для этой темы и даты уже есть сохранённая сессия: "
+            f"{answered_count}/{len(existing_tasks)} задач решено."
+        )
 
         if st.button("Продолжить сохранённую сессию"):
             load_session_into_state(existing_session)
@@ -745,21 +1098,32 @@ with tab_today:
         if st.button("Начать сессию и сгенерировать задачи"):
             with st.spinner("Gemini генерирует 40 задач и сохраняет их в Google Sheets..."):
                 try:
-                    generated_tasks = generate_tasks(selected_topic, selected_repetition_day)
+                    generated_tasks = generate_tasks(
+                        selected_topic,
+                        selected_repetition_day,
+                    )
 
-                    session_id = create_session(selected_topic["id"], selected_repetition_day, scheduled_date)
+                    session_id = create_session(
+                        selected_topic["id"],
+                        selected_repetition_day,
+                        scheduled_date,
+                    )
 
-                    save_generated_tasks(session_id, selected_topic, selected_repetition_day, generated_tasks)
+                    save_generated_tasks(
+                        session_id,
+                        selected_topic,
+                        selected_repetition_day,
+                        generated_tasks,
+                    )
 
-                    session = {
-                        "session_id": session_id,
-                        "topic_id": selected_topic["id"],
-                        "repetition_day": selected_repetition_day,
-                        "scheduled_date": scheduled_date,
-                        "started_at": now_iso(),
-                        "completed_at": "",
-                        "status": "in_progress",
-                    }
+                    session = find_session(
+                        selected_topic["id"],
+                        selected_repetition_day,
+                        scheduled_date,
+                    )
+
+                    if session is None:
+                        raise RuntimeError("Сессия создана, но не найдена при повторном чтении.")
 
                     load_session_into_state(session)
                     st.success("Сессия и задачи сохранены в Google Sheets.")
@@ -778,16 +1142,28 @@ with tab_today:
 
     if current_task_index >= len(tasks):
         st.success("Сессия завершена. Все задачи пройдены.")
+
+        if existing_session:
+            try:
+                update_session_status(existing_session, "completed", now_iso())
+            except Exception:
+                pass
+
         if st.button("Начать заново с первой задачи"):
             st.session_state["current_task_index"] = 0
             st.session_state["last_feedback"] = ""
+            st.session_state["last_verdict"] = ""
             st.session_state["user_answer"] = ""
             st.rerun()
+
         st.stop()
 
     current_task = tasks[current_task_index]
 
     render_task(current_task, current_task_index, len(tasks))
+
+    if current_task.get("status") == "answered":
+        st.info("Эта задача уже отмечена как отвеченная. Можно перейти дальше.")
 
     user_answer = st.text_area(
         "Твой ответ",
@@ -799,27 +1175,57 @@ with tab_today:
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Проверить"):
+        if st.button("Проверить и сохранить"):
             if not user_answer.strip():
                 st.warning("Сначала напиши ответ.")
             else:
-                with st.spinner("Gemini проверяет ответ..."):
+                with st.spinner("Gemini проверяет ответ и сохраняет фидбек..."):
                     try:
-                        feedback = get_feedback(current_task, user_answer, selected_topic)
-                        st.session_state["last_feedback"] = feedback
+                        feedback_data = get_feedback_json(
+                            current_task,
+                            user_answer,
+                            selected_topic,
+                        )
+
+                        save_answer(
+                            current_task,
+                            user_answer,
+                            feedback_data["feedback"],
+                            feedback_data["verdict"],
+                        )
+
+                        update_task_status(current_task, "answered")
+
+                        if feedback_data["verdict"] != "correct":
+                            save_mistake(
+                                selected_topic,
+                                current_task,
+                                feedback_data["mistake_type"],
+                                feedback_data["mistake_summary"],
+                            )
+
+                        st.session_state["last_feedback"] = feedback_data["feedback"]
+                        st.session_state["last_verdict"] = feedback_data["verdict"]
                         st.session_state["user_answer"] = user_answer
+
+                        refreshed_tasks = get_tasks_for_session(current_task["session_id"])
+                        st.session_state["tasks"] = refreshed_tasks
+
+                        st.success("Ответ, фидбек и статус задачи сохранены.")
                         st.rerun()
                     except Exception as e:
-                        st.error("Не удалось получить фидбек.")
+                        st.error("Не удалось получить или сохранить фидбек.")
                         st.code(str(e))
 
     with col2:
         if st.button("Следующая задача"):
             st.session_state["current_task_index"] = current_task_index + 1
             st.session_state["last_feedback"] = ""
+            st.session_state["last_verdict"] = ""
             st.session_state["user_answer"] = ""
             st.rerun()
 
     if st.session_state.get("last_feedback"):
         st.markdown("### Фидбек Gemini")
+        st.caption(f"Вердикт: {st.session_state.get('last_verdict', 'unknown')}")
         st.markdown(st.session_state["last_feedback"])
