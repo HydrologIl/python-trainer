@@ -181,9 +181,9 @@ STAGE_0_CURRICULUM = """
 - Мини-парсер: спрашивает у пользователя URL и записывает его в файл с таймстампом.
 """
 
-# learned_date — дата, когда тема была впервые изучена.
-# Приложение покажет тему на повторение через 1, 3, 7, 14 и 30 дней после этой даты.
-# Сейчас даты примерные. Замени их на свои реальные даты.
+# planned = тема ещё не пройдена и не участвует в расписании
+# active = тема пройдена и участвует в повторениях
+# completed = тема закрыта
 TOPICS = [
     {
         "id": "stage0_block1",
@@ -191,9 +191,9 @@ TOPICS = [
         "block": 1,
         "title": "Установка и запуск",
         "description": "Запуск Python, print(), комментарии, базовые ошибки при запуске.",
-        "learned_date": "2026-04-26",
+        "learned_date": "",
         "known_blocks": [1],
-        "status": "active",
+        "status": "planned",
     },
     {
         "id": "stage0_block2",
@@ -201,9 +201,9 @@ TOPICS = [
         "block": 2,
         "title": "Переменные и типы данных",
         "description": "Переменные, int, float, str, bool, преобразование типов.",
-        "learned_date": "2026-04-24",
+        "learned_date": "",
         "known_blocks": [1, 2],
-        "status": "active",
+        "status": "planned",
     },
     {
         "id": "stage0_block3",
@@ -211,9 +211,9 @@ TOPICS = [
         "block": 3,
         "title": "Ввод и условия",
         "description": "input(), if, elif, else, операторы сравнения и логические операторы.",
-        "learned_date": "2026-04-20",
+        "learned_date": "",
         "known_blocks": [1, 2, 3],
-        "status": "active",
+        "status": "planned",
     },
     {
         "id": "stage0_block4",
@@ -221,9 +221,9 @@ TOPICS = [
         "block": 4,
         "title": "Циклы for и range",
         "description": "for, range(), счётчики, шаги, простые циклические вычисления.",
-        "learned_date": "2026-04-13",
+        "learned_date": "",
         "known_blocks": [1, 2, 3, 4],
-        "status": "active",
+        "status": "planned",
     },
     {
         "id": "stage0_block5",
@@ -231,9 +231,9 @@ TOPICS = [
         "block": 5,
         "title": "Цикл while и флаги",
         "description": "while, флаги, break, continue.",
-        "learned_date": "2026-03-28",
+        "learned_date": "",
         "known_blocks": [1, 2, 3, 4, 5],
-        "status": "active",
+        "status": "planned",
     },
     {
         "id": "stage0_block6",
@@ -241,9 +241,9 @@ TOPICS = [
         "block": 6,
         "title": "Функции",
         "description": "def, аргументы, return, локальные переменные.",
-        "learned_date": "2026-04-26",
+        "learned_date": "",
         "known_blocks": [1, 2, 3, 4, 5, 6],
-        "status": "active",
+        "status": "planned",
     },
     {
         "id": "stage0_block7",
@@ -251,9 +251,9 @@ TOPICS = [
         "block": 7,
         "title": "Строки и списки",
         "description": "Индексация, срезы, методы строк, списки, append, remove, len.",
-        "learned_date": "2026-04-24",
+        "learned_date": "",
         "known_blocks": [1, 2, 3, 4, 5, 6, 7],
-        "status": "active",
+        "status": "planned",
     },
     {
         "id": "stage0_block8",
@@ -261,8 +261,8 @@ TOPICS = [
         "block": 8,
         "title": "Словари и множества + файлы",
         "description": "dict, set, уникальные элементы, чтение и запись .txt/.csv.",
-        "learned_date": "2026-04-20",
+        "learned_date": "",
         "known_blocks": [1, 2, 3, 4, 5, 6, 7, 8],
-        "status": "active",
+        "status": "planned",
     },
 ]
