@@ -1,7 +1,5 @@
-
-
 import streamlit as st
-import traceback
+from google import genai
 
 TASKS = [
     {
@@ -11,47 +9,86 @@ TASKS = [
 
 Пример:
 sum_numbers([1, 2, 3])  # 6
-""",
-        "tests": [
-            ("sum_numbers([1, 2, 3])", 6),
-            ("sum_numbers([])", 0),
-            ("sum_numbers([-1, 5, 10])", 14),
-        ],
-        "starter": "def sum_numbers(numbers):\n    pass"
+"""
     },
     {
         "title": "Задача 2: чётные числа",
         "description": """
-Напиши функцию get_even(numbers), которая возвращает только чётные числа.
+Напиши функцию `get_even(numbers)`, которая возвращает только чётные числа.
 
 Пример:
 get_even([1, 2, 3, 4])  # [2, 4]
-""",
-        "tests": [
-            ("get_even([1, 2, 3, 4])", [2, 4]),
-            ("get_even([1, 3, 5])", []),
-            ("get_even([0, -2, 7])", [0, -2]),
-        ],
-        "starter": "def get_even(numbers):\n    pass"
+"""
     },
     {
         "title": "Задача 3: переворот строки",
         "description": """
-Напиши функцию reverse_text(text).
+Напиши функцию `reverse_text(text)`, которая возвращает строку в обратном порядке.
 
 Пример:
 reverse_text('hello')  # 'olleh'
-""",
-        "tests": [
-            ("reverse_text('hello')", "olleh"),
-            ("reverse_text('')", ""),
-            ("reverse_text('Python')", "nohtyP"),
-        ],
-        "starter": "def reverse_text(text):\n    pass"
+"""
     }
 ]
 
+STARTER_CODE = {
+    "Задача 1: сумма чисел": "def sum_numbers(numbers):\n    pass",
+    "Задача 2: чётные числа": "def get_even(numbers):\n    pass",
+    "Задача 3: переворот строки": "def reverse_text(text):\n    pass",
+}
+
+
+def build_prompt(task_description: str, user_code: str) -> str:
+    return f"""
+Ты проверяешь решение учебной задачи по Python.
+
+Твоя роль:
+- не просто сказать "правильно/неправильно";
+- объяснить, что работает, а что нет;
+- дать подсказку, если решение ошибочное;
+- не переписывать сразу весь код, если пользователь близок к решению;
+- писать понятно и коротко, на русском языке.
+
+Задача:
+{task_description}
+
+Код пользователя:
+```python
+{user_code}
+```
+
+Ответь в формате:
+1. Вердикт: решение корректное / частично корректное / некорректное.
+2. Что хорошо.
+3. Что нужно исправить.
+4. Мини-подсказка.
+"""
+
+
+def ask_gemini(task_description: str, user_code: str) -> str:
+    api_key = st.secrets.get("GEMINI_API_KEY")
+
+    if not api_key:
+        return (
+            "Не найден GEMINI_API_KEY в Streamlit secrets.\n\n"
+            "Добавь секрет в настройках приложения:\n"
+            "GEMINI_API_KEY = \"твой_ключ\""
+        )
+
+    client = genai.Client(api_key=api_key)
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=build_prompt(task_description, user_code),
+    )
+
+    return response.text
+
+
+st.set_page_config(page_title="Python Trainer", page_icon="🐍")
+
 st.title("Python Trainer")
+st.write("Выбери задачу, напиши код и отправь его на проверку в Gemini.")
 
 task_index = st.selectbox(
     "Выбери задачу",
@@ -64,29 +101,23 @@ task = TASKS[task_index]
 st.subheader(task["title"])
 st.markdown(task["description"])
 
+default_code = STARTER_CODE.get(task["title"], "")
+
 user_code = st.text_area(
     "Твой код",
-    value=task["starter"],
-    height=250
+    value=default_code,
+    height=260
 )
 
 if st.button("Проверить"):
-    local_env = {}
-
-    try:
-        exec(user_code, {}, local_env)
-
-        passed = 0
-
-        for test_code, expected in task["tests"]:
-            result = eval(test_code, {}, local_env)
-            if result == expected:
-                st.success(f"{test_code} → OK")
-                passed += 1
-            else:
-                st.error(f"{test_code} → {result}, ожидалось {expected}")
-
-        st.write(f"Пройдено: {passed}/{len(task['tests'])}")
-
-    except Exception:
-        st.error(traceback.format_exc())
+    if not user_code.strip():
+        st.warning("Сначала вставь или напиши код.")
+    else:
+        with st.spinner("Gemini проверяет решение..."):
+            try:
+                feedback = ask_gemini(task["description"], user_code)
+                st.markdown("### Ответ Gemini")
+                st.markdown(feedback)
+            except Exception as e:
+                st.error("Не удалось получить ответ от Gemini.")
+                st.code(str(e))
