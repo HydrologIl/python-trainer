@@ -1,6 +1,7 @@
 import json
 import random
 import time
+import uuid
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -11,9 +12,21 @@ from google.oauth2.service_account import Credentials
 
 from curriculum import GENERAL_CURRICULUM, STAGE_0_CURRICULUM
 
+
 REPETITION_DAYS = [1, 3, 7, 14, 30]
-FALLBACK_MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash"]
+
+FALLBACK_MODELS = [
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+]
+
 TOPICS_SHEET_NAME = "topics"
+SESSIONS_SHEET_NAME = "sessions"
+TASKS_SHEET_NAME = "tasks"
+
+
+def now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
 
 
 def parse_date(value: str) -> date:
@@ -30,6 +43,7 @@ def parse_known_blocks(value: Any) -> list[int]:
     text = normalize_cell(value)
     if not text:
         return []
+
     result = []
     for part in text.split(","):
         part = part.strip()
@@ -41,105 +55,284 @@ def parse_known_blocks(value: Any) -> list[int]:
 @st.cache_resource(ttl=300)
 def get_spreadsheet() -> gspread.Spreadsheet:
     sheet_id = st.secrets.get("GOOGLE_SHEET_ID")
+
     if not sheet_id:
         raise RuntimeError("Не найден GOOGLE_SHEET_ID в Streamlit secrets.")
 
     service_account_info = dict(st.secrets["gcp_service_account"])
+
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
-    credentials = Credentials.from_service_account_info(service_account_info, scopes=scopes)
+
+    credentials = Credentials.from_service_account_info(
+        service_account_info,
+        scopes=scopes,
+    )
+
     client = gspread.authorize(credentials)
     return client.open_by_key(sheet_id)
 
 
-def get_topics_worksheet() -> gspread.Worksheet:
-    return get_spreadsheet().worksheet(TOPICS_SHEET_NAME)
+def get_worksheet(name: str) -> gspread.Worksheet:
+    spreadsheet = get_spreadsheet()
+    return spreadsheet.worksheet(name)
 
 
 def load_topics() -> list[dict[str, Any]]:
-    worksheet = get_topics_worksheet()
+    worksheet = get_worksheet(TOPICS_SHEET_NAME)
     records = worksheet.get_all_records()
+
     topics = []
+
     for index, record in enumerate(records, start=2):
         topic_id = normalize_cell(record.get("topic_id"))
+
         if not topic_id:
             continue
-        topics.append({
-            "row_number": index,
-            "id": topic_id,
-            "stage": normalize_cell(record.get("stage")),
-            "block": int(record.get("block") or 0),
-            "title": normalize_cell(record.get("title")),
-            "description": normalize_cell(record.get("description")),
-            "learned_date": normalize_cell(record.get("learned_date")),
-            "known_blocks": parse_known_blocks(record.get("known_blocks")),
-            "status": normalize_cell(record.get("status")) or "planned",
-        })
+
+        topics.append(
+            {
+                "row_number": index,
+                "id": topic_id,
+                "stage": normalize_cell(record.get("stage")),
+                "block": int(record.get("block") or 0),
+                "title": normalize_cell(record.get("title")),
+                "description": normalize_cell(record.get("description")),
+                "learned_date": normalize_cell(record.get("learned_date")),
+                "known_blocks": parse_known_blocks(record.get("known_blocks")),
+                "status": normalize_cell(record.get("status")) or "planned",
+            }
+        )
+
     return topics
 
 
 def update_topic(topic: dict[str, Any], learned_date: str, status: str) -> None:
-    worksheet = get_topics_worksheet()
+    worksheet = get_worksheet(TOPICS_SHEET_NAME)
     row_number = topic["row_number"]
+
     # F = learned_date, H = status
     worksheet.update_cell(row_number, 6, learned_date)
     worksheet.update_cell(row_number, 8, status)
+
     st.cache_resource.clear()
+
+
+def load_sessions() -> list[dict[str, Any]]:
+    worksheet = get_worksheet(SESSIONS_SHEET_NAME)
+    records = worksheet.get_all_records()
+
+    sessions = []
+
+    for index, record in enumerate(records, start=2):
+        session_id = normalize_cell(record.get("session_id"))
+
+        if not session_id:
+            continue
+
+        sessions.append(
+            {
+                "row_number": index,
+                "session_id": session_id,
+                "topic_id": normalize_cell(record.get("topic_id")),
+                "repetition_day": int(record.get("repetition_day") or 0),
+                "scheduled_date": normalize_cell(record.get("scheduled_date")),
+                "started_at": normalize_cell(record.get("started_at")),
+                "completed_at": normalize_cell(record.get("completed_at")),
+                "status": normalize_cell(record.get("status")) or "planned",
+            }
+        )
+
+    return sessions
+
+
+def load_tasks() -> list[dict[str, Any]]:
+    worksheet = get_worksheet(TASKS_SHEET_NAME)
+    records = worksheet.get_all_records()
+
+    tasks = []
+
+    for index, record in enumerate(records, start=2):
+        task_id = normalize_cell(record.get("task_id"))
+
+        if not task_id:
+            continue
+
+        tasks.append(
+            {
+                "row_number": index,
+                "task_id": task_id,
+                "session_id": normalize_cell(record.get("session_id")),
+                "topic_id": normalize_cell(record.get("topic_id")),
+                "repetition_day": int(record.get("repetition_day") or 0),
+                "type": normalize_cell(record.get("task_type")),
+                "difficulty": normalize_cell(record.get("difficulty")),
+                "task": normalize_cell(record.get("task_text")),
+                "code": normalize_cell(record.get("code")),
+                "order": int(record.get("order") or 0),
+                "status": normalize_cell(record.get("status")) or "new",
+                "created_at": normalize_cell(record.get("created_at")),
+            }
+        )
+
+    return tasks
+
+
+def find_session(topic_id: str, repetition_day: int, scheduled_date: str) -> dict[str, Any] | None:
+    sessions = load_sessions()
+
+    for session in sessions:
+        if (
+            session["topic_id"] == topic_id
+            and session["repetition_day"] == repetition_day
+            and session["scheduled_date"] == scheduled_date
+            and session["status"] != "deleted"
+        ):
+            return session
+
+    return None
+
+
+def get_tasks_for_session(session_id: str) -> list[dict[str, Any]]:
+    tasks = [task for task in load_tasks() if task["session_id"] == session_id]
+    return sorted(tasks, key=lambda task: task["order"])
+
+
+def create_session(topic_id: str, repetition_day: int, scheduled_date: str) -> str:
+    session_id = f"session_{uuid.uuid4().hex[:12]}"
+
+    worksheet = get_worksheet(SESSIONS_SHEET_NAME)
+    worksheet.append_row(
+        [
+            session_id,
+            topic_id,
+            repetition_day,
+            scheduled_date,
+            now_iso(),
+            "",
+            "in_progress",
+        ],
+        value_input_option="USER_ENTERED",
+    )
+
+    return session_id
+
+
+def save_generated_tasks(session_id: str, topic: dict[str, Any], repetition_day: int, generated_tasks: list[dict[str, Any]]) -> None:
+    worksheet = get_worksheet(TASKS_SHEET_NAME)
+
+    rows = []
+
+    for index, task in enumerate(generated_tasks, start=1):
+        task_id = f"task_{uuid.uuid4().hex[:12]}"
+
+        rows.append(
+            [
+                task_id,
+                session_id,
+                topic["id"],
+                repetition_day,
+                normalize_cell(task.get("type")),
+                normalize_cell(task.get("difficulty")),
+                normalize_cell(task.get("task")),
+                normalize_cell(task.get("code")),
+                index,
+                "new",
+                now_iso(),
+            ]
+        )
+
+    worksheet.append_rows(rows, value_input_option="USER_ENTERED")
 
 
 def get_repetition_info(topic: dict[str, Any], today: date) -> dict[str, Any] | None:
     status = topic.get("status")
     learned_date_value = topic.get("learned_date")
+
     if status != "active" or not learned_date_value:
         return None
+
     learned_date = parse_date(learned_date_value)
     days_after_learning = (today - learned_date).days
+
     if days_after_learning in REPETITION_DAYS:
-        return {"topic": topic, "repetition_day": days_after_learning, "learned_date": learned_date}
+        return {
+            "topic": topic,
+            "repetition_day": days_after_learning,
+            "learned_date": learned_date,
+        }
+
     return None
 
 
 def get_today_repetitions(topics: list[dict[str, Any]], today: date) -> list[dict[str, Any]]:
-    return [info for topic in topics if (info := get_repetition_info(topic, today))]
+    repetitions = []
+
+    for topic in topics:
+        repetition_info = get_repetition_info(topic, today)
+        if repetition_info:
+            repetitions.append(repetition_info)
+
+    return repetitions
 
 
 def get_next_repetition(topic: dict[str, Any], today: date) -> str:
     learned_date_value = topic.get("learned_date", "")
     status = topic.get("status", "planned")
+
     if status == "planned":
         return "тема ещё не отмечена как пройденная"
+
     if status == "completed":
         return "тема закрыта"
+
     if status == "paused":
         return "тема на паузе"
+
     if not learned_date_value:
         return "дата изучения не указана"
+
     learned_date = parse_date(learned_date_value)
     days_passed = (today - learned_date).days
+
     if days_passed < 0:
         return f"изучение запланировано на {learned_date.isoformat()}"
+
     for repetition_day in REPETITION_DAYS:
         if repetition_day >= days_passed:
             next_date = learned_date + timedelta(days=repetition_day)
             return f"день {repetition_day}: {next_date.isoformat()}"
+
     return "все повторения по этой теме пройдены"
 
 
+def get_api_key() -> str | None:
+    return st.secrets.get("GEMINI_API_KEY")
+
+
 def get_gemini_client() -> genai.Client | None:
-    api_key = st.secrets.get("GEMINI_API_KEY")
+    api_key = get_api_key()
+
     if not api_key:
         return None
+
     return genai.Client(api_key=api_key)
 
 
 def call_gemini_with_retry(prompt: str, models: list[str] | None = None) -> str:
     client = get_gemini_client()
+
     if client is None:
-        raise RuntimeError("Не найден GEMINI_API_KEY в Streamlit secrets.")
+        raise RuntimeError(
+            "Не найден GEMINI_API_KEY в Streamlit secrets. "
+            "Добавь его в настройках приложения."
+        )
+
     model_list = models or FALLBACK_MODELS
     last_error = None
+
     for model in model_list:
         for attempt in range(3):
             try:
@@ -148,20 +341,30 @@ def call_gemini_with_retry(prompt: str, models: list[str] | None = None) -> str:
             except Exception as e:
                 last_error = e
                 message = str(e)
+
                 is_overload = (
                     "503" in message
                     or "UNAVAILABLE" in message
                     or "overloaded" in message.lower()
                     or "high demand" in message.lower()
                 )
+
                 if not is_overload:
                     raise
-                time.sleep(min(12, (2 ** attempt) + random.uniform(0, 1.5)))
-    raise RuntimeError(f"Gemini сейчас перегружен или недоступен. Последняя ошибка: {last_error}")
+
+                sleep_seconds = min(12, (2 ** attempt) + random.uniform(0, 1.5))
+                time.sleep(sleep_seconds)
+
+    raise RuntimeError(
+        "Gemini сейчас перегружен или недоступен после нескольких попыток. "
+        "Попробуй позже. Последняя ошибка: "
+        f"{last_error}"
+    )
 
 
 def build_task_generation_prompt(topic: dict[str, Any], repetition_day: int) -> str:
     known_blocks = ", ".join(str(block) for block in topic.get("known_blocks", []))
+
     return f"""
 Ты — эксперт по Python для анализа данных и опытный преподаватель.
 
@@ -205,14 +408,34 @@ def build_task_generation_prompt(topic: dict[str, Any], repetition_day: int) -> 
 
 Формат JSON:
 [
-  {{"id": 1, "type": "debug", "difficulty": "начальный", "task": "Текст условия", "code": "код, если он нужен для задачи"}},
-  {{"id": 11, "type": "output_prediction", "difficulty": "начальный", "task": "Что выведет код?", "code": "код для анализа"}},
-  {{"id": 21, "type": "write_code", "difficulty": "начальный", "task": "Напиши код...", "code": ""}}
+  {{
+    "id": 1,
+    "type": "debug",
+    "difficulty": "начальный",
+    "task": "Текст условия",
+    "code": "код, если он нужен для задачи"
+  }},
+  {{
+    "id": 11,
+    "type": "output_prediction",
+    "difficulty": "начальный",
+    "task": "Что выведет код?",
+    "code": "код для анализа"
+  }},
+  {{
+    "id": 21,
+    "type": "write_code",
+    "difficulty": "начальный",
+    "task": "Напиши код...",
+    "code": ""
+  }}
 ]
 """
 
 
 def build_feedback_prompt(task: dict[str, Any], user_answer: str, topic: dict[str, Any]) -> str:
+    code_part = task.get("code", "")
+
     return f"""
 Ты проверяешь решение учебной задачи по Python.
 
@@ -227,7 +450,7 @@ def build_feedback_prompt(task: dict[str, Any], user_answer: str, topic: dict[st
 
 Код из условия, если есть:
 ```python
-{task.get("code", "")}
+{code_part}
 ```
 
 Ответ пользователя:
@@ -256,28 +479,54 @@ def build_feedback_prompt(task: dict[str, Any], user_answer: str, topic: dict[st
 
 def extract_json_from_gemini(text: str) -> list[dict[str, Any]]:
     clean_text = text.strip()
+
     if clean_text.startswith("```json"):
         clean_text = clean_text.removeprefix("```json").strip()
+
     if clean_text.startswith("```"):
         clean_text = clean_text.removeprefix("```").strip()
+
     if clean_text.endswith("```"):
         clean_text = clean_text.removesuffix("```").strip()
+
     return json.loads(clean_text)
 
 
 def generate_tasks(topic: dict[str, Any], repetition_day: int) -> list[dict[str, Any]]:
-    response_text = call_gemini_with_retry(build_task_generation_prompt(topic, repetition_day))
+    response_text = call_gemini_with_retry(
+        build_task_generation_prompt(topic, repetition_day),
+        models=FALLBACK_MODELS,
+    )
     return extract_json_from_gemini(response_text)
 
 
 def get_feedback(task: dict[str, Any], user_answer: str, topic: dict[str, Any]) -> str:
-    return call_gemini_with_retry(build_feedback_prompt(task, user_answer, topic))
+    return call_gemini_with_retry(build_feedback_prompt(task, user_answer, topic), models=FALLBACK_MODELS)
 
 
 def reset_session() -> None:
-    for key in ["tasks", "current_task_index", "selected_topic_id", "selected_repetition_day", "last_feedback", "user_answer", "answer_input"]:
+    for key in [
+        "current_session_id",
+        "tasks",
+        "current_task_index",
+        "selected_topic_id",
+        "selected_repetition_day",
+        "last_feedback",
+        "user_answer",
+        "answer_input",
+    ]:
         if key in st.session_state:
             del st.session_state[key]
+
+
+def load_session_into_state(session: dict[str, Any]) -> None:
+    tasks = get_tasks_for_session(session["session_id"])
+
+    st.session_state["current_session_id"] = session["session_id"]
+    st.session_state["tasks"] = tasks
+    st.session_state["current_task_index"] = 0
+    st.session_state["last_feedback"] = ""
+    st.session_state["user_answer"] = ""
 
 
 def render_task(task: dict[str, Any], index: int, total: int) -> None:
@@ -286,28 +535,41 @@ def render_task(task: dict[str, Any], index: int, total: int) -> None:
         "output_prediction": "Что выведет код?",
         "write_code": "Написание кода",
     }
+
     task_type = task_type_labels.get(task.get("type"), task.get("type", "Задача"))
+
     st.markdown(f"### Задача {index + 1} из {total}")
     st.caption(f"{task_type} · сложность: {task.get('difficulty', 'не указана')}")
+
     st.write(task.get("task", ""))
+
     if task.get("code"):
         st.code(task["code"], language="python")
 
 
 st.set_page_config(page_title="Python Trainer", page_icon="🐍", layout="centered")
+
 st.title("Python Trainer")
-st.write("Google Sheets как база тем + повторения по Эббингаузу + проверка через Gemini.")
+st.write("Google Sheets как база тем, сессий и задач + проверка через Gemini.")
 
 with st.sidebar:
     st.header("Настройки")
-    today_value = st.date_input("Дата для расчёта повторений", value=date.today())
-    if st.button("Сбросить текущую сессию задач"):
+
+    today_value = st.date_input(
+        "Дата для расчёта повторений",
+        value=date.today(),
+        help="Можно поставить другую дату, чтобы проверить будущие или прошлые повторения.",
+    )
+
+    if st.button("Сбросить текущий экран"):
         reset_session()
         st.rerun()
+
     if st.button("Перечитать Google Sheet"):
         st.cache_resource.clear()
         reset_session()
         st.rerun()
+
     st.markdown("---")
     st.caption("Дни повторения: 1, 3, 7, 14, 30.")
     st.caption(f"Модели Gemini: {', '.join(FALLBACK_MODELS)}")
@@ -320,11 +582,15 @@ except Exception as e:
     st.code(str(e))
     st.stop()
 
-tab_today, tab_plan = st.tabs(["Сегодня", "Учебный план"])
+tab_today, tab_plan, tab_sessions = st.tabs(["Сегодня", "Учебный план", "Сессии"])
 
 with tab_plan:
     st.header("Учебный план")
-    st.info("Темы, статусы и даты теперь читаются из Google Sheets. Изменения сохраняются обратно в лист topics.")
+
+    st.info(
+        "Темы, статусы и даты читаются из Google Sheets. "
+        "Изменения сохраняются обратно в лист topics."
+    )
 
     selected_topic_for_edit = st.selectbox(
         "Тема",
@@ -335,6 +601,8 @@ with tab_plan:
     current_status = selected_topic_for_edit.get("status", "planned")
     if current_status not in ["planned", "active", "completed", "paused"]:
         current_status = "planned"
+
+    current_learned_date = selected_topic_for_edit.get("learned_date", "")
 
     status = st.selectbox(
         "Статус",
@@ -348,11 +616,12 @@ with tab_plan:
         }[value],
     )
 
-    current_learned_date = selected_topic_for_edit.get("learned_date", "")
     default_date = parse_date(current_learned_date) if current_learned_date else today_value
+
     learned_date_input = st.date_input("Дата изучения темы", value=default_date)
 
     col_a, col_b = st.columns(2)
+
     with col_a:
         if st.button("Сохранить дату и статус"):
             try:
@@ -363,6 +632,7 @@ with tab_plan:
             except Exception as e:
                 st.error("Не удалось сохранить изменения.")
                 st.code(str(e))
+
     with col_b:
         if st.button("Отметить как пройденную сегодня"):
             try:
@@ -375,6 +645,7 @@ with tab_plan:
                 st.code(str(e))
 
     st.subheader("Все темы")
+
     for topic in topics:
         st.write(
             f"**Блок {topic['block']}. {topic['title']}** — "
@@ -383,31 +654,63 @@ with tab_plan:
             f"следующее: {get_next_repetition(topic, today_value)}"
         )
 
+with tab_sessions:
+    st.header("Сессии")
+
+    try:
+        sessions = load_sessions()
+        tasks = load_tasks()
+
+        if not sessions:
+            st.info("Сессий пока нет.")
+        else:
+            for session in sorted(sessions, key=lambda s: s["started_at"], reverse=True):
+                session_tasks = [task for task in tasks if task["session_id"] == session["session_id"]]
+
+                topic_title = next(
+                    (topic["title"] for topic in topics if topic["id"] == session["topic_id"]),
+                    session["topic_id"],
+                )
+
+                st.write(
+                    f"**{topic_title}** — день {session['repetition_day']} — "
+                    f"{session['scheduled_date']} — {len(session_tasks)} задач — статус `{session['status']}`"
+                )
+    except Exception as e:
+        st.error("Не удалось прочитать сессии.")
+        st.code(str(e))
+
 with tab_today:
     st.header("Сегодня")
+
     today_repetitions = get_today_repetitions(topics, today_value)
 
     if not today_repetitions:
         st.info("На выбранную дату нет тем для повторения.")
+
         with st.expander("Показать все активные темы"):
             for topic in topics:
                 if topic.get("status") != "active":
                     continue
+
                 st.write(
                     f"**Блок {topic['block']}. {topic['title']}** — "
                     f"изучено {topic.get('learned_date')}; "
                     f"следующее: {get_next_repetition(topic, today_value)}"
                 )
+
         st.stop()
 
     options = {
         f"Блок {item['topic']['block']}. {item['topic']['title']} — день {item['repetition_day']}": item
         for item in today_repetitions
     }
+
     selected_label = st.selectbox("Выбери повторение", list(options.keys()))
     selected_item = options[selected_label]
     selected_topic = selected_item["topic"]
     selected_repetition_day = selected_item["repetition_day"]
+    scheduled_date = today_value.isoformat()
 
     st.markdown(
         f"""
@@ -421,38 +724,69 @@ with tab_today:
         st.session_state.get("selected_topic_id") == selected_topic["id"]
         and st.session_state.get("selected_repetition_day") == selected_repetition_day
     )
+
     if not session_matches_selection:
-        st.session_state["tasks"] = []
-        st.session_state["current_task_index"] = 0
-        st.session_state["last_feedback"] = ""
-        st.session_state["user_answer"] = ""
+        reset_session()
         st.session_state["selected_topic_id"] = selected_topic["id"]
         st.session_state["selected_repetition_day"] = selected_repetition_day
 
-    if not st.session_state.get("tasks"):
+    existing_session = find_session(selected_topic["id"], selected_repetition_day, scheduled_date)
+
+    if existing_session and not st.session_state.get("tasks"):
+        existing_tasks = get_tasks_for_session(existing_session["session_id"])
+
+        st.success(f"Для этой темы и даты уже есть сохранённая сессия: {len(existing_tasks)} задач.")
+
+        if st.button("Продолжить сохранённую сессию"):
+            load_session_into_state(existing_session)
+            st.rerun()
+
+    if not existing_session and not st.session_state.get("tasks"):
         if st.button("Начать сессию и сгенерировать задачи"):
-            with st.spinner("Gemini генерирует 40 задач..."):
+            with st.spinner("Gemini генерирует 40 задач и сохраняет их в Google Sheets..."):
                 try:
-                    st.session_state["tasks"] = generate_tasks(selected_topic, selected_repetition_day)
-                    st.session_state["current_task_index"] = 0
-                    st.session_state["last_feedback"] = ""
-                    st.session_state["user_answer"] = ""
+                    generated_tasks = generate_tasks(selected_topic, selected_repetition_day)
+
+                    session_id = create_session(selected_topic["id"], selected_repetition_day, scheduled_date)
+
+                    save_generated_tasks(session_id, selected_topic, selected_repetition_day, generated_tasks)
+
+                    session = {
+                        "session_id": session_id,
+                        "topic_id": selected_topic["id"],
+                        "repetition_day": selected_repetition_day,
+                        "scheduled_date": scheduled_date,
+                        "started_at": now_iso(),
+                        "completed_at": "",
+                        "status": "in_progress",
+                    }
+
+                    load_session_into_state(session)
+                    st.success("Сессия и задачи сохранены в Google Sheets.")
                     st.rerun()
                 except Exception as e:
-                    st.error("Не удалось сгенерировать задачи.")
+                    st.error("Не удалось сгенерировать или сохранить задачи.")
                     st.code(str(e))
+
+        st.stop()
+
+    if not st.session_state.get("tasks"):
         st.stop()
 
     tasks = st.session_state["tasks"]
     current_task_index = st.session_state.get("current_task_index", 0)
+
     if current_task_index >= len(tasks):
         st.success("Сессия завершена. Все задачи пройдены.")
-        if st.button("Начать заново"):
-            reset_session()
+        if st.button("Начать заново с первой задачи"):
+            st.session_state["current_task_index"] = 0
+            st.session_state["last_feedback"] = ""
+            st.session_state["user_answer"] = ""
             st.rerun()
         st.stop()
 
     current_task = tasks[current_task_index]
+
     render_task(current_task, current_task_index, len(tasks))
 
     user_answer = st.text_area(
@@ -463,6 +797,7 @@ with tab_today:
     )
 
     col1, col2 = st.columns(2)
+
     with col1:
         if st.button("Проверить"):
             if not user_answer.strip():
@@ -477,6 +812,7 @@ with tab_today:
                     except Exception as e:
                         st.error("Не удалось получить фидбек.")
                         st.code(str(e))
+
     with col2:
         if st.button("Следующая задача"):
             st.session_state["current_task_index"] = current_task_index + 1
