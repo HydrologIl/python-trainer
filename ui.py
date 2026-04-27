@@ -250,10 +250,11 @@ def render_progress_tab(topics: list[dict[str, Any]], today_value: date) -> None
         mistakes = load_mistakes()
         stats = build_progress_stats(topics, sessions, tasks, answers)
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         col1.metric("Сессий", stats["sessions_count"])
         col2.metric("Задач решено", f"{stats['answered_tasks']}/{stats['total_tasks']}")
         col3.metric("Ответов сохранено", stats["answers_count"])
+        col4.metric("Плохих задач", stats.get("bad_tasks_count", 0))
 
         verdict_counts = stats["verdict_counts"]
 
@@ -303,7 +304,8 @@ def render_progress_tab(topics: list[dict[str, Any]], today_value: date) -> None
                 f"решено {answered}/{total}; "
                 f"корректно: {topic_stat['correct']}, "
                 f"частично: {topic_stat['partial']}, "
-                f"ошибки: {topic_stat['incorrect']}"
+                f"ошибки: {topic_stat['incorrect']}, "
+                f"плохие задачи: {topic_stat.get('bad_tasks', 0)}"
             )
             st.progress(ratio)
 
@@ -624,7 +626,7 @@ def render_task_complaint(current_task: dict[str, Any], current_task_index: int)
 
         if st.button(
             "Сохранить жалобу и убрать задачу из сессии",
-            disabled=current_task.get("status") in ["answered", "bad_task"],
+            disabled=current_task.get("status") == "bad_task",
         ):
             try:
                 save_task_feedback(current_task, issue_type, issue_comment)
