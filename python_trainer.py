@@ -323,6 +323,95 @@ def get_answers_by_task_id() -> dict[str, list[dict[str, Any]]]:
     return result
 
 
+def get_latest_answer_for_task(task_id: str) -> dict[str, Any] | None:
+    answers = get_answers_by_task_id().get(task_id, [])
+
+    if not answers:
+        return None
+
+    return sorted(answers, key=lambda answer: answer.get("created_at", ""))[-1]
+
+
+def get_session_progress(tasks: list[dict[str, Any]]) -> dict[str, int]:
+    total = len(tasks)
+    answered = len([task for task in tasks if task.get("status") == "answered"])
+    skipped = len([task for task in tasks if task.get("status") == "skipped"])
+    remaining = total - answered - skipped
+
+    return {
+        "total": total,
+        "answered": answered,
+        "skipped": skipped,
+        "remaining": remaining,
+    }
+
+
+def get_upcoming_repetitions(
+    topics: list[dict[str, Any]],
+    today: date,
+    horizon_days: int = 7,
+) -> list[dict[str, Any]]:
+    upcoming = []
+
+    for topic in topics:
+        if topic.get("status") != "active" or not topic.get("learned_date"):
+            continue
+
+        learned_date = parse_date(topic["learned_date"])
+
+        for repetition_day in REPETITION_DAYS:
+            repetition_date = learned_date + timedelta(days=repetition_day)
+
+            if today <= repetition_date <= today + timedelta(days=horizon_days):
+                upcoming.append(
+                    {
+                        "date": repetition_date,
+                        "topic": topic,
+                        "repetition_day": repetition_day,
+                    }
+                )
+
+    return sorted(upcoming, key=lambda item: item["date"])
+
+
+@st.cache_data(ttl=60)
+def load_mistakes() -> list[dict[str, Any]]:
+    worksheet = get_worksheet(MISTAKES_SHEET_NAME)
+    records = worksheet.get_all_records()
+
+    mistakes = []
+
+    for index, record in enumerate(records, start=2):
+        mistake_id = normalize_cell(record.get("mistake_id"))
+
+        if not mistake_id:
+            continue
+
+        mistakes.append(
+            {
+                "row_number": index,
+                "mistake_id": mistake_id,
+                "topic_id": normalize_cell(record.get("topic_id")),
+                "task_id": normalize_cell(record.get("task_id")),
+                "mistake_type": normalize_cell(record.get("mistake_type")),
+                "mistake_summary": normalize_cell(record.get("mistake_summary")),
+                "created_at": normalize_cell(record.get("created_at")),
+            }
+        )
+
+    return mistakes
+
+
+def get_top_mistakes(mistakes: list[dict[str, Any]], limit: int = 10) -> list[tuple[str, int]]:
+    counts: dict[str, int] = {}
+
+    for mistake in mistakes:
+        mistake_type = mistake.get("mistake_type") or "unknown"
+        counts[mistake_type] = counts.get(mistake_type, 0) + 1
+
+    return sorted(counts.items(), key=lambda item: item[1], reverse=True)[:limit]
+
+
 def get_first_unanswered_index(tasks: list[dict[str, Any]]) -> int:
     for index, task in enumerate(tasks):
         if task.get("status") != "answered":
@@ -831,7 +920,7 @@ def build_progress_stats(
 st.set_page_config(page_title="Python Trainer", page_icon="🐍", layout="centered")
 
 st.title("Python Trainer")
-st.write("Google Sheets как база тем, сессий, задач, ответов и фидбека.")
+st.write("Google Sheets как база + удобная сессия + прогресс и ошибки.")
 
 with st.sidebar:
     st.header("Настройки")
@@ -1001,6 +1090,7 @@ with tab_progress:
         sessions = load_sessions()
         tasks = load_tasks()
         answers = load_answers()
+        mistakes = load_mistakes()
         stats = build_progress_stats(topics, sessions, tasks, answers)
 
         col1, col2, col3 = st.columns(3)
@@ -1017,16 +1107,48 @@ with tab_progress:
         col_c.metric("Некорректно", verdict_counts["incorrect"])
         col_d.metric("Неясно", verdict_counts["unknown"])
 
+        if stats["answered_tasks"] > 0:
+            correct_rate = round(verdict_counts["correct"] / stats["answered_tasks"] * 100)
+            st.progress(correct_rate / 100)
+            st.caption(f"Доля корректных ответов: {correct_rate}%")
+
+        st.subheader("Ближайшие повторения на 7 дней")
+        upcoming = get_upcoming_repetitions(topics, today_value, horizon_days=7)
+
+        if not upcoming:
+            st.info("На ближайшие 7 дней повторений нет.")
+        else:
+            for item in upcoming:
+                st.write(
+                    f"**{item['date'].isoformat()}** — "
+                    f"Блок {item['topic']['block']}. {item['topic']['title']} — "
+                    f"день {item['repetition_day']}"
+                )
+
+        st.subheader("Топ ошибок")
+        top_mistakes = get_top_mistakes(mistakes)
+
+        if not top_mistakes:
+            st.info("Ошибок пока нет.")
+        else:
+            for mistake_type, count in top_mistakes:
+                st.write(f"**{mistake_type}** — {count}")
+
         st.subheader("По темам")
 
         for topic_stat in stats["topic_stats"].values():
+            total = topic_stat["total"]
+            answered = topic_stat["answered"]
+            ratio = answered / total if total else 0
+
             st.write(
                 f"**{topic_stat['title']}** — "
-                f"решено {topic_stat['answered']}/{topic_stat['total']}; "
+                f"решено {answered}/{total}; "
                 f"корректно: {topic_stat['correct']}, "
                 f"частично: {topic_stat['partial']}, "
                 f"ошибки: {topic_stat['incorrect']}"
             )
+            st.progress(ratio)
 
     except Exception as e:
         st.error("Не удалось построить прогресс.")
@@ -1149,11 +1271,21 @@ with tab_today:
 
     tasks = st.session_state["tasks"]
     current_task_index = st.session_state.get("current_task_index", 0)
+    progress = get_session_progress(tasks)
+
+    st.markdown("### Прогресс сессии")
+    st.progress((progress["answered"] + progress["skipped"]) / progress["total"])
+    st.caption(
+        f"Решено: {progress['answered']} · "
+        f"пропущено: {progress['skipped']} · "
+        f"осталось: {progress['remaining']} · "
+        f"всего: {progress['total']}"
+    )
 
     if current_task_index >= len(tasks):
-        st.success("Сессия завершена. Все задачи пройдены.")
+        st.success("Сессия завершена. Все задачи просмотрены.")
 
-        if existing_session:
+        if existing_session and progress["remaining"] == 0:
             try:
                 update_session_status(existing_session, "completed", now_iso())
             except Exception:
@@ -1169,23 +1301,46 @@ with tab_today:
         st.stop()
 
     current_task = tasks[current_task_index]
+    latest_answer = get_latest_answer_for_task(current_task["task_id"])
 
     render_task(current_task, current_task_index, len(tasks))
 
     if current_task.get("status") == "answered":
-        st.info("Эта задача уже отмечена как отвеченная. Можно перейти дальше.")
+        st.info("Эта задача уже решена. Повторная отправка отключена.")
+    elif current_task.get("status") == "skipped":
+        st.warning("Эта задача была пропущена. Можно вернуться к ней позже.")
+
+    if latest_answer:
+        with st.expander("Показать сохранённый ответ и фидбек", expanded=True):
+            st.markdown("**Твой сохранённый ответ:**")
+            st.code(latest_answer["user_answer"], language="python")
+            st.markdown("**Фидбек Gemini:**")
+            st.caption(f"Вердикт: {latest_answer.get('verdict', 'unknown')}")
+            st.markdown(latest_answer["gemini_feedback"])
 
     user_answer = st.text_area(
         "Твой ответ",
         value=st.session_state.get("user_answer", ""),
         height=260,
         key="answer_input",
+        disabled=current_task.get("status") == "answered",
     )
 
-    col1, col2 = st.columns(2)
+    col_prev, col_check, col_skip, col_next = st.columns(4)
 
-    with col1:
-        if st.button("Проверить и сохранить"):
+    with col_prev:
+        if st.button("← Назад", disabled=current_task_index == 0):
+            st.session_state["current_task_index"] = max(0, current_task_index - 1)
+            st.session_state["last_feedback"] = ""
+            st.session_state["last_verdict"] = ""
+            st.session_state["user_answer"] = ""
+            st.rerun()
+
+    with col_check:
+        if st.button(
+            "Проверить",
+            disabled=current_task.get("status") == "answered",
+        ):
             if not user_answer.strip():
                 st.warning("Сначала напиши ответ.")
             else:
@@ -1227,8 +1382,29 @@ with tab_today:
                         st.error("Не удалось получить или сохранить фидбек.")
                         st.code(str(e))
 
-    with col2:
-        if st.button("Следующая задача"):
+    with col_skip:
+        if st.button(
+            "Пропустить",
+            disabled=current_task.get("status") == "answered",
+        ):
+            try:
+                skip_task(current_task)
+                refreshed_tasks = get_tasks_for_session(current_task["session_id"])
+                st.session_state["tasks"] = refreshed_tasks
+                st.session_state["current_task_index"] = min(
+                    current_task_index + 1,
+                    len(refreshed_tasks),
+                )
+                st.session_state["last_feedback"] = ""
+                st.session_state["last_verdict"] = ""
+                st.session_state["user_answer"] = ""
+                st.rerun()
+            except Exception as e:
+                st.error("Не удалось пропустить задачу.")
+                st.code(str(e))
+
+    with col_next:
+        if st.button("Дальше →"):
             st.session_state["current_task_index"] = current_task_index + 1
             st.session_state["last_feedback"] = ""
             st.session_state["last_verdict"] = ""
