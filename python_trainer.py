@@ -26,6 +26,7 @@ SESSIONS_SHEET_NAME = "sessions"
 TASKS_SHEET_NAME = "tasks"
 ANSWERS_SHEET_NAME = "answers"
 MISTAKES_SHEET_NAME = "mistakes"
+TASK_FEEDBACK_SHEET_NAME = "task_feedback"
 
 
 def now_iso() -> str:
@@ -336,12 +337,14 @@ def get_session_progress(tasks: list[dict[str, Any]]) -> dict[str, int]:
     total = len(tasks)
     answered = len([task for task in tasks if task.get("status") == "answered"])
     skipped = len([task for task in tasks if task.get("status") == "skipped"])
-    remaining = total - answered - skipped
+    bad_tasks = len([task for task in tasks if task.get("status") == "bad_task"])
+    remaining = total - answered - skipped - bad_tasks
 
     return {
         "total": total,
         "answered": answered,
         "skipped": skipped,
+        "bad_tasks": bad_tasks,
         "remaining": remaining,
     }
 
@@ -402,6 +405,78 @@ def load_mistakes() -> list[dict[str, Any]]:
     return mistakes
 
 
+@st.cache_data(ttl=60)
+def load_task_feedback() -> list[dict[str, Any]]:
+    worksheet = get_or_create_worksheet(
+        TASK_FEEDBACK_SHEET_NAME,
+        [
+            "feedback_id",
+            "task_id",
+            "session_id",
+            "topic_id",
+            "issue_type",
+            "comment",
+            "created_at",
+        ],
+    )
+
+    records = worksheet.get_all_records()
+    feedback_items = []
+
+    for index, record in enumerate(records, start=2):
+        feedback_id = normalize_cell(record.get("feedback_id"))
+
+        if not feedback_id:
+            continue
+
+        feedback_items.append(
+            {
+                "row_number": index,
+                "feedback_id": feedback_id,
+                "task_id": normalize_cell(record.get("task_id")),
+                "session_id": normalize_cell(record.get("session_id")),
+                "topic_id": normalize_cell(record.get("topic_id")),
+                "issue_type": normalize_cell(record.get("issue_type")),
+                "comment": normalize_cell(record.get("comment")),
+                "created_at": normalize_cell(record.get("created_at")),
+            }
+        )
+
+    return feedback_items
+
+
+def get_task_feedback_context(topic_id: str, limit: int = 12) -> str:
+    try:
+        feedback_items = load_task_feedback()
+    except Exception:
+        return "Пока нет сохранённых жалоб на задачи."
+
+    relevant = [
+        item for item in feedback_items
+        if item.get("topic_id") == topic_id
+    ]
+
+    general = [
+        item for item in feedback_items
+        if item.get("topic_id") != topic_id
+    ]
+
+    selected_items = (relevant[-limit:] + general[-max(0, limit - len(relevant)):])[-limit:]
+
+    if not selected_items:
+        return "Пока нет сохранённых жалоб на задачи."
+
+    lines = []
+
+    for item in selected_items:
+        comment = item.get("comment") or "без комментария"
+        lines.append(
+            f"- Тип проблемы: {item.get('issue_type')}. Комментарий пользователя: {comment}"
+        )
+
+    return "\n".join(lines)
+
+
 def get_top_mistakes(mistakes: list[dict[str, Any]], limit: int = 10) -> list[tuple[str, int]]:
     counts: dict[str, int] = {}
 
@@ -413,9 +488,12 @@ def get_top_mistakes(mistakes: list[dict[str, Any]], limit: int = 10) -> list[tu
 
 
 def get_first_unanswered_index(tasks: list[dict[str, Any]]) -> int:
+    closed_statuses = {"answered", "skipped", "bad_task"}
+
     for index, task in enumerate(tasks):
-        if task.get("status") != "answered":
+        if task.get("status") not in closed_statuses:
             return index
+
     return len(tasks)
 
 
@@ -597,6 +675,7 @@ def call_gemini_with_retry(prompt: str, models: list[str] | None = None) -> str:
 
 def build_task_generation_prompt(topic: dict[str, Any], repetition_day: int) -> str:
     known_blocks = ", ".join(str(block) for block in topic.get("known_blocks", []))
+    task_feedback_context = get_task_feedback_context(topic["id"])
 
     return f"""
 Ты — эксперт по Python для анализа данных и опытный преподаватель.
@@ -621,6 +700,11 @@ def build_task_generation_prompt(topic: dict[str, Any], repetition_day: int) -> 
 День повторения:
 {repetition_day}
 
+Ниже — журнал жалоб пользователя на ранее сгенерированные задачи. Это НЕ ошибки пользователя, а дефекты генерации.
+Используй этот журнал как анти-примеры: не повторяй такие проблемы в новых задачах.
+Журнал дефектов задач:
+{task_feedback_context}
+
 Сгенерируй ровно 40 задач:
 - 10 задач на исправление ошибок;
 - 10 задач формата "что выведет код?";
@@ -633,6 +717,11 @@ def build_task_generation_prompt(topic: dict[str, Any], repetition_day: int) -> 
 - не давай решений;
 - не добавляй комментарии-подсказки в код;
 - задачи должны быть уникальными;
+- для задач типа "debug" в коде ОБЯЗАНА быть реальная ошибка;
+- для задач типа "debug" условие НЕ ДОЛЖНО говорить, что код неправильный, если код уже корректен;
+- для задач типа "debug" перед выдачей задачи мысленно проверь, что ошибка действительно существует;
+- для задач типа "output_prediction" код должен быть корректным и исполняемым, если задача не просит найти ошибку;
+- если задача про исправление ошибки, не делай ошибку слишком очевидной через комментарий или текст условия;
 - где уместно, используй контекст реальных данных: продажи, маркетинг, HR, финансы, списки клиентов, файлы, простая аналитика;
 - формулировки должны быть понятными и короткими;
 - язык — русский.
@@ -1278,6 +1367,7 @@ with tab_today:
     st.caption(
         f"Решено: {progress['answered']} · "
         f"пропущено: {progress['skipped']} · "
+        f"плохие задачи: {progress['bad_tasks']} · "
         f"осталось: {progress['remaining']} · "
         f"всего: {progress['total']}"
     )
@@ -1309,6 +1399,8 @@ with tab_today:
         st.info("Эта задача уже решена. Повторная отправка отключена.")
     elif current_task.get("status") == "skipped":
         st.warning("Эта задача была пропущена. Можно вернуться к ней позже.")
+    elif current_task.get("status") == "bad_task":
+        st.warning("Эта задача помечена как проблемная и не считается учебной ошибкой.")
 
     if latest_answer:
         with st.expander("Показать сохранённый ответ и фидбек", expanded=True):
@@ -1323,7 +1415,7 @@ with tab_today:
         value=st.session_state.get("user_answer", ""),
         height=260,
         key="answer_input",
-        disabled=current_task.get("status") == "answered",
+        disabled=current_task.get("status") in ["answered", "bad_task"],
     )
 
     col_prev, col_check, col_skip, col_next = st.columns(4)
@@ -1339,7 +1431,7 @@ with tab_today:
     with col_check:
         if st.button(
             "Проверить",
-            disabled=current_task.get("status") == "answered",
+            disabled=current_task.get("status") in ["answered", "bad_task"],
         ):
             if not user_answer.strip():
                 st.warning("Сначала напиши ответ.")
@@ -1385,7 +1477,7 @@ with tab_today:
     with col_skip:
         if st.button(
             "Пропустить",
-            disabled=current_task.get("status") == "answered",
+            disabled=current_task.get("status") in ["answered", "bad_task"],
         ):
             try:
                 skip_task(current_task)
@@ -1410,6 +1502,53 @@ with tab_today:
             st.session_state["last_verdict"] = ""
             st.session_state["user_answer"] = ""
             st.rerun()
+
+
+    with st.expander("Пожаловаться на задачу / пометить как плохую"):
+        issue_type = st.selectbox(
+            "Что не так с задачей?",
+            [
+                "условие противоречит коду",
+                "непонятно, что нужно сделать",
+                "задача не по текущей теме",
+                "слишком легко",
+                "слишком сложно",
+                "есть подсказка в условии",
+                "другое",
+            ],
+        )
+
+        issue_comment = st.text_area(
+            "Комментарий",
+            placeholder="Например: условие говорит, что код неправильный, но код уже корректный.",
+            height=120,
+            key=f"task_feedback_comment_{current_task['task_id']}",
+        )
+
+        if st.button(
+            "Сохранить жалобу и убрать задачу из сессии",
+            disabled=current_task.get("status") in ["answered", "bad_task"],
+        ):
+            try:
+                save_task_feedback(current_task, issue_type, issue_comment)
+                mark_bad_task(current_task)
+
+                refreshed_tasks = get_tasks_for_session(current_task["session_id"])
+                st.session_state["tasks"] = refreshed_tasks
+                st.session_state["current_task_index"] = min(
+                    current_task_index + 1,
+                    len(refreshed_tasks),
+                )
+                st.session_state["last_feedback"] = ""
+                st.session_state["last_verdict"] = ""
+                st.session_state["user_answer"] = ""
+
+                st.success("Задача помечена как проблемная и убрана из активного прохождения.")
+                st.rerun()
+            except Exception as e:
+                st.error("Не удалось сохранить жалобу на задачу.")
+                st.code(str(e))
+
 
     if st.session_state.get("last_feedback"):
         st.markdown("### Фидбек Gemini")
