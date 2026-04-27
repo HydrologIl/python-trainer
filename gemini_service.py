@@ -9,9 +9,22 @@ from google import genai
 from curriculum import GENERAL_CURRICULUM, STAGE_0_CURRICULUM
 
 
-FALLBACK_MODELS = [
+# Генерация задач требует более сильной модели.
+TASK_GENERATION_MODELS = [
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+]
+
+# Проверка ответов обычно проще, поэтому используем модель дешевле/быстрее.
+FEEDBACK_MODELS = [
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
+]
+
+# Для отображения в sidebar старого ui.py.
+FALLBACK_MODELS = [
+    f"generation: {TASK_GENERATION_MODELS[0]}",
+    f"feedback: {FEEDBACK_MODELS[0]}",
 ]
 
 
@@ -64,7 +77,30 @@ def get_gemini_client() -> genai.Client | None:
     return genai.Client(api_key=api_key)
 
 
-def call_gemini_with_retry(prompt: str, models: list[str] | None = None) -> str:
+def is_retryable_error(message: str) -> bool:
+    lowered = message.lower()
+
+    return (
+        "503" in message
+        or "unavailable" in lowered
+        or "overloaded" in lowered
+        or "high demand" in lowered
+        or "retry" in lowered
+    )
+
+
+def is_quota_error(message: str) -> bool:
+    lowered = message.lower()
+
+    return (
+        "429" in message
+        or "resource_exhausted" in lowered
+        or "quota" in lowered
+        or "rate limit" in lowered
+    )
+
+
+def call_gemini_with_retry(prompt: str, models: list[str]) -> str:
     client = get_gemini_client()
 
     if client is None:
@@ -73,10 +109,9 @@ def call_gemini_with_retry(prompt: str, models: list[str] | None = None) -> str:
             "Добавь его в настройках приложения."
         )
 
-    model_list = models or FALLBACK_MODELS
     last_error = None
 
-    for model in model_list:
+    for model in models:
         for attempt in range(3):
             try:
                 response = client.models.generate_content(
@@ -88,23 +123,19 @@ def call_gemini_with_retry(prompt: str, models: list[str] | None = None) -> str:
                 last_error = e
                 message = str(e)
 
-                is_overload = (
-                    "503" in message
-                    or "UNAVAILABLE" in message
-                    or "overloaded" in message.lower()
-                    or "high demand" in message.lower()
-                )
+                if is_quota_error(message):
+                    break
 
-                if not is_overload:
+                if not is_retryable_error(message):
                     raise
 
                 sleep_seconds = min(12, (2 ** attempt) + random.uniform(0, 1.5))
                 time.sleep(sleep_seconds)
 
     raise RuntimeError(
-        "Gemini сейчас перегружен или недоступен после нескольких попыток. "
-        "Попробуй позже. Последняя ошибка: "
-        f"{last_error}"
+        "Gemini не смог обработать запрос доступными моделями. "
+        "Возможные причины: квота, rate limit, перегрузка модели или billing. "
+        f"Модели: {models}. Последняя ошибка: {last_error}"
     )
 
 
@@ -287,7 +318,7 @@ def generate_tasks(
             repetition_day,
             task_feedback_context,
         ),
-        models=FALLBACK_MODELS,
+        models=TASK_GENERATION_MODELS,
     )
     return extract_json_from_gemini(response_text)
 
@@ -299,6 +330,6 @@ def get_feedback_json(
 ) -> dict[str, str]:
     response_text = call_gemini_with_retry(
         build_feedback_prompt(task, user_answer, topic),
-        models=FALLBACK_MODELS,
+        models=FEEDBACK_MODELS,
     )
     return extract_feedback_json(response_text)
