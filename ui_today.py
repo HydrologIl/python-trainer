@@ -27,6 +27,7 @@ from ui_common import (
     render_task,
     load_session_into_state,
 )
+from ui_datasets import get_dataset_selector
 
 
 def render_today_tab(topics: list[dict[str, Any]], today_value: date) -> None:
@@ -102,6 +103,11 @@ def render_today_tab(topics: list[dict[str, Any]], today_value: date) -> None:
             st.rerun()
 
     if not existing_session and not st.session_state.get("tasks"):
+        selected_dataset = get_dataset_selector(
+            label="Датасет для генерации задач",
+            key=f"today_dataset_{selected_topic['id']}_{selected_repetition_day}_{scheduled_date}",
+        )
+
         if st.button("Начать сессию и сгенерировать задачи"):
             with st.spinner("Gemini генерирует 40 задач и сохраняет их в Google Sheets..."):
                 try:
@@ -110,6 +116,7 @@ def render_today_tab(topics: list[dict[str, Any]], today_value: date) -> None:
                         selected_topic,
                         selected_repetition_day,
                         task_feedback_context=task_feedback_context,
+                        dataset=selected_dataset,
                     )
 
                     session_id = create_session(
