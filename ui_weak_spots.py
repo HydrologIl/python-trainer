@@ -156,6 +156,7 @@ def render_weak_spots_tab(topics: list[dict[str, Any]], today_value: date) -> No
 
                 st.session_state["selected_topic_id"] = selected_topic["id"]
                 st.session_state["selected_repetition_day"] = -1
+                st.session_state["active_session_source"] = "weak_spots"
                 load_session_into_state(session)
 
                 st.success("Тренировка сохранена. Можно решать прямо здесь.")
@@ -168,6 +169,7 @@ def render_weak_spots_tab(topics: list[dict[str, Any]], today_value: date) -> No
         st.session_state.get("tasks")
         and st.session_state.get("selected_topic_id") == selected_topic["id"]
         and st.session_state.get("selected_repetition_day") == -1
+        and st.session_state.get("active_session_source") != "sessions"
     ):
         st.markdown("---")
         st.subheader("Текущая тренировка на слабое место")
