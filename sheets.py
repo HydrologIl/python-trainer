@@ -15,6 +15,7 @@ TASKS_SHEET_NAME = "tasks"
 ANSWERS_SHEET_NAME = "answers"
 MISTAKES_SHEET_NAME = "mistakes"
 TASK_FEEDBACK_SHEET_NAME = "task_feedback"
+DATASETS_SHEET_NAME = "datasets"
 
 
 def now_iso() -> str:
@@ -436,6 +437,63 @@ def get_task_feedback_context(topic_id: str, limit: int = 12) -> str:
         )
 
     return "\n".join(lines)
+
+
+
+
+@st.cache_data(ttl=60)
+def load_datasets() -> list[dict[str, Any]]:
+    worksheet = get_or_create_worksheet(
+        DATASETS_SHEET_NAME,
+        [
+            "dataset_id",
+            "name",
+            "domain",
+            "description",
+            "tables",
+            "columns",
+            "example_rows",
+            "best_for_topics",
+            "difficulty",
+            "source",
+            "status",
+        ],
+    )
+
+    records = worksheet.get_all_records()
+    datasets = []
+
+    for index, record in enumerate(records, start=2):
+        dataset_id = normalize_cell(record.get("dataset_id"))
+
+        if not dataset_id:
+            continue
+
+        datasets.append(
+            {
+                "row_number": index,
+                "dataset_id": dataset_id,
+                "name": normalize_cell(record.get("name")),
+                "domain": normalize_cell(record.get("domain")),
+                "description": normalize_cell(record.get("description")),
+                "tables": normalize_cell(record.get("tables")),
+                "columns": normalize_cell(record.get("columns")),
+                "example_rows": normalize_cell(record.get("example_rows")),
+                "best_for_topics": normalize_cell(record.get("best_for_topics")),
+                "difficulty": normalize_cell(record.get("difficulty")),
+                "source": normalize_cell(record.get("source")),
+                "status": normalize_cell(record.get("status")) or "active",
+            }
+        )
+
+    return datasets
+
+
+def get_active_datasets() -> list[dict[str, Any]]:
+    return [
+        dataset for dataset in load_datasets()
+        if dataset.get("status") == "active"
+    ]
 
 
 def find_session(
