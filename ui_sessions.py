@@ -99,6 +99,7 @@ def render_sessions_tab(topics: list[dict[str, Any]]) -> None:
                     load_session_into_state(session)
                     st.session_state["selected_topic_id"] = session["topic_id"]
                     st.session_state["selected_repetition_day"] = session["repetition_day"]
+                    st.session_state["active_session_source"] = "sessions"
                     st.rerun()
 
     except Exception as e:
