@@ -99,6 +99,7 @@ def render_today_tab(topics: list[dict[str, Any]], today_value: date) -> None:
         )
 
         if st.button("Продолжить сохранённую сессию"):
+            st.session_state["active_session_source"] = "today"
             load_session_into_state(existing_session)
             st.rerun()
 
@@ -141,6 +142,7 @@ def render_today_tab(topics: list[dict[str, Any]], today_value: date) -> None:
                     if session is None:
                         raise RuntimeError("Сессия создана, но не найдена при повторном чтении.")
 
+                    st.session_state["active_session_source"] = "today"
                     load_session_into_state(session)
                     st.success("Сессия и задачи сохранены в Google Sheets.")
                     st.rerun()
@@ -151,6 +153,9 @@ def render_today_tab(topics: list[dict[str, Any]], today_value: date) -> None:
         return
 
     if not st.session_state.get("tasks"):
+        return
+
+    if st.session_state.get("active_session_source") not in [None, "today"]:
         return
 
     render_active_session(selected_topic, existing_session)
