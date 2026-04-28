@@ -19,6 +19,7 @@ def reset_session() -> None:
         "last_verdict",
         "user_answer",
         "answer_input",
+        "active_session_source",
     ]:
         if key in st.session_state:
             del st.session_state[key]
