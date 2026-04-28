@@ -34,7 +34,10 @@ def render_sessions_tab(topics: list[dict[str, Any]]) -> None:
                 None,
             )
 
-            if current_session:
+            if (
+                current_session
+                and st.session_state.get("active_session_source") == "sessions"
+            ):
                 current_topic = topic_by_id.get(current_session["topic_id"])
 
                 if current_topic:
