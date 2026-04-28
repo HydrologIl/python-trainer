@@ -34,6 +34,32 @@ def normalize_cell(value: Any) -> str:
     return str(value).strip()
 
 
+
+
+def format_dataset_context(dataset: dict[str, Any] | None) -> str:
+    if not dataset:
+        return "Датасет не выбран. Генерируй задачи на простых реалистичных примерах."
+
+    return f"""
+Выбранный датасет для контекста задач:
+- dataset_id: {dataset.get("dataset_id", "")}
+- name: {dataset.get("name", "")}
+- domain: {dataset.get("domain", "")}
+- description: {dataset.get("description", "")}
+- tables: {dataset.get("tables", "")}
+- columns: {dataset.get("columns", "")}
+- example_rows: {dataset.get("example_rows", "")}
+- best_for_topics: {dataset.get("best_for_topics", "")}
+- difficulty: {dataset.get("difficulty", "")}
+- source: {dataset.get("source", "")}
+
+Используй этот датасет как реалистичный бизнес-контекст для задач.
+Не требуй чтения настоящего CSV, если задача рассчитана на ранние блоки Python.
+Можно использовать маленькие списки, словари и фрагменты данных, имитирующие строки этого датасета.
+Если тема уже связана с pandas/файлами, можно формулировать задачи как работу с таблицей или фрагментом CSV.
+"""
+
+
 def normalize_verdict(value: str) -> str:
     value = normalize_cell(value).lower()
 
@@ -143,8 +169,10 @@ def build_task_generation_prompt(
     topic: dict[str, Any],
     repetition_day: int,
     task_feedback_context: str = "Пока нет сохранённых жалоб на задачи.",
+    dataset: dict[str, Any] | None = None,
 ) -> str:
     known_blocks = ", ".join(str(block) for block in topic.get("known_blocks", []))
+    dataset_context = format_dataset_context(dataset)
 
     return f"""
 Ты — эксперт по Python для анализа данных и опытный преподаватель.
@@ -172,6 +200,9 @@ def build_task_generation_prompt(
 Журнал жалоб пользователя на ранее сгенерированные задачи. Это дефекты генерации, а не ошибки пользователя.
 Используй этот журнал как анти-примеры и не повторяй такие проблемы:
 {task_feedback_context}
+
+Контекст датасета:
+{dataset_context}
 
 Сгенерируй ровно 40 задач:
 - 10 задач на исправление ошибок;
@@ -311,12 +342,14 @@ def generate_tasks(
     topic: dict[str, Any],
     repetition_day: int,
     task_feedback_context: str = "Пока нет сохранённых жалоб на задачи.",
+    dataset: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     response_text = call_gemini_with_retry(
         build_task_generation_prompt(
             topic,
             repetition_day,
             task_feedback_context,
+            dataset=dataset,
         ),
         models=TASK_GENERATION_MODELS,
     )
@@ -330,9 +363,11 @@ def build_weak_spot_generation_prompt(
     mistake_examples: list[str],
     task_count: int,
     difficulty: str,
+    dataset: dict[str, Any] | None = None,
 ) -> str:
     known_blocks = ", ".join(str(block) for block in topic.get("known_blocks", []))
     examples_text = "\n".join(f"- {example}" for example in mistake_examples) or "Примеров нет."
+    dataset_context = format_dataset_context(dataset)
 
     return f"""
 Ты — эксперт по Python для анализа данных и опытный преподаватель.
@@ -353,6 +388,9 @@ def build_weak_spot_generation_prompt(
 
 Примеры прошлых ошибок:
 {examples_text}
+
+Контекст датасета для задач на слабое место:
+{dataset_context}
 
 Сгенерируй ровно {task_count} задач.
 
@@ -392,6 +430,7 @@ def generate_weak_spot_tasks(
     mistake_examples: list[str],
     task_count: int = 10,
     difficulty: str = "начальный",
+    dataset: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     response_text = call_gemini_with_retry(
         build_weak_spot_generation_prompt(
@@ -400,6 +439,7 @@ def generate_weak_spot_tasks(
             mistake_examples=mistake_examples,
             task_count=task_count,
             difficulty=difficulty,
+            dataset=dataset,
         ),
         models=TASK_GENERATION_MODELS,
     )
