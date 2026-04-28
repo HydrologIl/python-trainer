@@ -12,6 +12,7 @@ from sheets import (
 )
 from ui_common import load_session_into_state
 from ui_today import render_active_session
+from ui_datasets import get_dataset_selector
 
 
 def group_mistakes_by_topic_and_type(
@@ -120,6 +121,11 @@ def render_weak_spots_tab(topics: list[dict[str, Any]], today_value: date) -> No
         index=0,
     )
 
+    selected_dataset = get_dataset_selector(
+        label="Датасет для тренировки слабого места",
+        key=f"weak_dataset_{selected_topic['id']}_{mistake_group['mistake_type']}",
+    )
+
     if st.button("Сгенерировать тренировку на слабое место"):
         with st.spinner("Gemini генерирует тренировку и сохраняет её в Google Sheets..."):
             try:
@@ -129,6 +135,7 @@ def render_weak_spots_tab(topics: list[dict[str, Any]], today_value: date) -> No
                     mistake_examples=mistake_group["examples"],
                     task_count=task_count,
                     difficulty=difficulty,
+                    dataset=selected_dataset,
                 )
 
                 session_id = create_session(
