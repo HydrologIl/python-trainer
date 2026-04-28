@@ -9,14 +9,13 @@ from ui import (
     render_sessions_tab,
     render_progress_tab,
     render_weak_spots_tab,
-    render_datasets_tab,
 )
 
 
 st.set_page_config(page_title="Python Trainer", page_icon="🐍", layout="centered")
 
 st.title("Python Trainer")
-st.write("Google Sheets как база + удобная сессия + прогресс, ошибки и датасеты.")
+st.write("Google Sheets как база + удобная сессия + прогресс и ошибки.")
 
 today_value = render_sidebar()
 
@@ -32,8 +31,8 @@ except Exception as e:
     st.code(str(e))
     st.stop()
 
-tab_today, tab_plan, tab_sessions, tab_progress, tab_weak_spots, tab_datasets = st.tabs(
-    ["Сегодня", "Учебный план", "Сессии", "Прогресс", "Слабые места", "Датасеты"]
+tab_today, tab_plan, tab_sessions, tab_progress, tab_weak_spots = st.tabs(
+    ["Сегодня", "Учебный план", "Сессии", "Прогресс", "Слабые места"]
 )
 
 with tab_plan:
@@ -47,9 +46,6 @@ with tab_progress:
 
 with tab_weak_spots:
     render_weak_spots_tab(topics, today_value)
-
-with tab_datasets:
-    render_datasets_tab()
 
 with tab_today:
     render_today_tab(topics, today_value)
