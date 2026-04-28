@@ -9,6 +9,7 @@ from ui import (
     render_sessions_tab,
     render_progress_tab,
     render_weak_spots_tab,
+    render_datasets_tab,
 )
 
 
@@ -31,8 +32,8 @@ except Exception as e:
     st.code(str(e))
     st.stop()
 
-tab_today, tab_plan, tab_sessions, tab_progress, tab_weak_spots = st.tabs(
-    ["Сегодня", "Учебный план", "Сессии", "Прогресс", "Слабые места"]
+tab_today, tab_plan, tab_sessions, tab_progress, tab_weak_spots, tab_datasets = st.tabs(
+    ["Сегодня", "Учебный план", "Сессии", "Прогресс", "Слабые места", "Датасеты"]
 )
 
 with tab_plan:
@@ -46,6 +47,9 @@ with tab_progress:
 
 with tab_weak_spots:
     render_weak_spots_tab(topics, today_value)
+
+with tab_datasets:
+    render_datasets_tab()
 
 with tab_today:
     render_today_tab(topics, today_value)
