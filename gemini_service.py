@@ -323,6 +323,90 @@ def generate_tasks(
     return extract_json_from_gemini(response_text)
 
 
+
+def build_weak_spot_generation_prompt(
+    topic: dict[str, Any],
+    mistake_type: str,
+    mistake_examples: list[str],
+    task_count: int,
+    difficulty: str,
+) -> str:
+    known_blocks = ", ".join(str(block) for block in topic.get("known_blocks", []))
+    examples_text = "\n".join(f"- {example}" for example in mistake_examples) or "Примеров нет."
+
+    return f"""
+Ты — эксперт по Python для анализа данных и опытный преподаватель.
+
+Нужно сгенерировать короткую тренировку на слабое место студента.
+
+Текущая тема:
+{topic["stage"]}, блок {topic["block"]}: {topic["title"]}
+
+Описание темы:
+{topic["description"]}
+
+Студент уже прошёл блоки:
+{known_blocks}
+
+Слабое место:
+{mistake_type}
+
+Примеры прошлых ошибок:
+{examples_text}
+
+Сгенерируй ровно {task_count} задач.
+
+Требования:
+- задачи должны тренировать именно слабое место;
+- задачи должны быть в рамках текущей темы;
+- для решения должны требоваться только знания из уже пройденных блоков;
+- не давай решений;
+- не давай подсказок в условии;
+- язык русский;
+- сложность: {difficulty};
+- смешай форматы задач:
+  - исправление ошибок;
+  - что выведет код;
+  - написание кода;
+- для debug-задач в коде должна быть реальная ошибка;
+- output_prediction должен содержать корректный исполняемый код.
+
+Верни строго валидный JSON без markdown-блока и без пояснений.
+
+Формат JSON:
+[
+  {{
+    "id": 1,
+    "type": "debug",
+    "difficulty": "{difficulty}",
+    "task": "Текст условия",
+    "code": "код, если он нужен для задачи"
+  }}
+]
+"""
+
+
+def generate_weak_spot_tasks(
+    topic: dict[str, Any],
+    mistake_type: str,
+    mistake_examples: list[str],
+    task_count: int = 10,
+    difficulty: str = "начальный",
+) -> list[dict[str, Any]]:
+    response_text = call_gemini_with_retry(
+        build_weak_spot_generation_prompt(
+            topic=topic,
+            mistake_type=mistake_type,
+            mistake_examples=mistake_examples,
+            task_count=task_count,
+            difficulty=difficulty,
+        ),
+        models=TASK_GENERATION_MODELS,
+    )
+    return extract_json_from_gemini(response_text)
+
+
+
 def get_feedback_json(
     task: dict[str, Any],
     user_answer: str,
