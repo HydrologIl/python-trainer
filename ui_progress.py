@@ -7,7 +7,6 @@ import streamlit as st
 from scheduler import get_upcoming_repetitions
 from sheets import (
     build_progress_stats,
-    get_top_mistakes,
     load_answers,
     load_mistakes,
     load_sessions,
@@ -280,14 +279,12 @@ def render_progress_tab(topics: list[dict], today_value: date) -> None:
                     hide_index=True,
                 )
 
-            top_mistakes = get_top_mistakes(mistakes, limit=5)
-
-            if top_mistakes:
-                with st.expander("Последние частые ошибки"):
-                    for mistake in top_mistakes:
+            if not mistake_type_df.empty:
+                with st.expander("Частые ошибки"):
+                    for _, row in mistake_type_df.head(5).iterrows():
                         st.write(
-                            f"- `{mistake['mistake_type']}` — "
-                            f"{mistake['count']} раз"
+                            f"- `{row['Тип ошибки']}` — "
+                            f"{row['Количество']} раз"
                         )
 
         st.markdown("---")
