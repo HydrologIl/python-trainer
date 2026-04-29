@@ -19,3 +19,4 @@ from ui_today import (
 )
 
 from ui_datasets import render_datasets_tab
+from ui_active_session import render_active_session_top
