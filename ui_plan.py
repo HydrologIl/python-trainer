@@ -116,7 +116,7 @@ def render_plan_tab(topics: list[dict], today_value: date) -> None:
 
     learned_date_input = st.text_input(
         "Дата изучения темы",
-        value=topic.get("learned_date") or today_value.strftime("%Y/%m/%d"),
+        value=topic.get("learned_date") or today_value.strftime("%Y-%m-%d"),
         key=f"learned_date_{topic['id']}",
     )
 
@@ -147,7 +147,7 @@ def render_plan_tab(topics: list[dict], today_value: date) -> None:
                     topic["row_number"],
                     {
                         "status": "learned",
-                        "learned_date": today_value.strftime("%Y/%m/%d"),
+                        "learned_date": today_value.strftime("%Y-%m-%d"),
                     },
                 )
                 reset_session()
@@ -196,7 +196,7 @@ def render_plan_tab(topics: list[dict], today_value: date) -> None:
         upcoming.append(
             {
                 "День": repetition_day,
-                "Дата": repetition_date.strftime("%Y/%m/%d"),
+                "Дата": repetition_date.strftime("%Y-%m-%d"),
                 "Статус": (
                     "сегодня"
                     if repetition_date == today_value
