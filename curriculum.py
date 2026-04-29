@@ -1446,3 +1446,462 @@ status, segment, loyalty_member, product_category.
 pivot_table, минимум 2 графика и понятные текстовые выводы.
 """
 
+STAGE_3_CURRICULUM = """
+Этап 3: Продвинутый анализ и автоматизация (Upper-Middle), версия 2.
+
+Блок 1. Reshaping: melt и длинный формат.
+Цель: превращать широкую таблицу в длинную для анализа и графиков.
+
+Блок 2. Reshaping: pivot, stack и unstack.
+Цель: преобразовывать длинную таблицу обратно в широкую и читать MultiIndex.
+
+Блок 3. Временные ряды: shift, diff и pct_change.
+Цель: сравнивать текущий период с предыдущим и считать приросты.
+
+Блок 4. Временные ряды: rolling и resample.
+Цель: сглаживать временные ряды и менять частоту данных.
+
+Блок 5. API: requests, GET, параметры и статус ответа.
+Цель: получать данные из внешнего API через простой GET-запрос.
+
+Блок 6. API: JSON и преобразование в DataFrame.
+Цель: понимать JSON-ответ и превращать его в таблицу.
+
+Блок 7. SQL из Python: SQLAlchemy и pd.read_sql.
+Цель: читать данные из базы в pandas.
+
+Блок 8. ETL: файлы, папки и объединение источников.
+Цель: собирать много файлов из папки в единый датасет.
+
+Блок 9. ETL: try/except и logging.
+Цель: делать ETL-скрипт устойчивым к ошибкам и понятным по логам.
+
+Блок 10. Excel-отчеты: несколько листов и pandas ExcelWriter.
+Цель: генерировать Excel-отчёты с несколькими листами.
+
+Блок 11. Excel и файлы отчёта: форматирование и сохранение графиков.
+Цель: делать бизнес-отчёт более читаемым: форматирование и картинки.
+
+Блок 12. Производительность: векторизация и оптимизация памяти.
+Цель: писать код быстрее и экономнее по памяти.
+
+Блок 13. Большие файлы: chunksize и инкрементальная обработка.
+Цель: обрабатывать файлы, которые нельзя комфортно загрузить целиком.
+
+Блок 14. Итоговый проект: автоматизация E-commerce отчёта.
+Цель: собрать автоматический отчёт из файлов, API, расчётов, Excel и графиков.
+"""
+
+
+STAGE_3_KNOWLEDGE_MATRIX = """
+Матрица знаний этапа 3.
+Общее правило: генерируй задачи только на обязательное ядро текущего и уже пройденных блоков. Не используй раздел «Пока не трогать».
+
+Блок 1. Reshaping: melt и длинный формат.
+Цель: Превращать широкую таблицу в длинную для анализа и графиков.
+Обязательное ядро:
+- wide vs long format
+- pd.melt()
+- id_vars
+- value_vars
+- var_name
+- value_name
+- подготовка месячных колонок к анализу
+Частотные конструкции:
+- pd.melt(df, id_vars=["region"], value_vars=["Jan", "Feb"], var_name="month", value_name="sales")
+- long_df = df.melt(id_vars="product", var_name="month", value_name="revenue")
+Типовые ошибки:
+- забывают id_vars
+- путают var_name и value_name
+- теряют идентификаторы строк
+- melt применён к уже длинной таблице
+Пока не трогать:
+- сложные MultiIndex columns
+- wide_to_long
+- сложные tidy data кейсы
+Критерий готовности: Студент уверенно переводит таблицу из wide в long и объясняет, зачем это нужно.
+
+Блок 2. Reshaping: pivot, stack и unstack.
+Цель: Преобразовывать длинную таблицу обратно в широкую и читать MultiIndex.
+Обязательное ядро:
+- pivot()
+- pivot_table vs pivot
+- index
+- columns
+- values
+- stack()
+- unstack()
+- MultiIndex после reshape
+- reset_index()
+Частотные конструкции:
+- df.pivot(index="date", columns="category", values="sales")
+- df.set_index(["date", "category"])["sales"].unstack()
+- wide.stack().reset_index()
+Типовые ошибки:
+- pivot падает из-за дублей
+- путают pivot и pivot_table
+- не понимают MultiIndex
+- забывают reset_index
+Пока не трогать:
+- сложный stack/unstack на нескольких уровнях
+- wide_to_long
+- xarray
+Критерий готовности: Строит простые pivot/unstack-таблицы и возвращает результат к читаемому DataFrame.
+
+Блок 3. Временные ряды: shift, diff и pct_change.
+Цель: Сравнивать текущий период с предыдущим и считать приросты.
+Обязательное ядро:
+- sort_values по дате
+- shift()
+- diff()
+- pct_change()
+- period-over-period growth
+- MoM/WoW/DoD
+- группировка перед shift
+Частотные конструкции:
+- df["prev_revenue"] = df["revenue"].shift(1)
+- df["growth"] = df["revenue"].pct_change()
+- df["delta"] = df["revenue"].diff()
+Типовые ошибки:
+- shift без сортировки по дате
+- pct_change на несгруппированных данных
+- путают diff и pct_change
+- не учитывают первый NaN после shift
+Пока не трогать:
+- сложные лаги по нескольким группам
+- seasonal decomposition
+- forecasting
+Критерий готовности: Считает абсолютный и процентный прирост между периодами.
+
+Блок 4. Временные ряды: rolling и resample.
+Цель: Сглаживать временные ряды и менять частоту данных.
+Обязательное ядро:
+- datetime index
+- set_index по дате
+- resample()
+- rolling()
+- rolling mean
+- rolling sum
+- окно
+- min_periods
+- сглаживание шума
+Частотные конструкции:
+- df.set_index("date").resample("M")["revenue"].sum()
+- df["ma7"] = df["revenue"].rolling(7).mean()
+- df["rolling_sum"] = df["orders"].rolling(window=7, min_periods=1).sum()
+Типовые ошибки:
+- resample без datetime index
+- rolling до сортировки по дате
+- не понимают NaN в начале rolling
+- путают resample и groupby
+Пока не трогать:
+- ARIMA/prophet
+- timezone
+- сложное прогнозирование
+Критерий готовности: Строит месячную/недельную динамику и 7-дневное скользящее среднее.
+
+Блок 5. API: requests, GET, параметры и статус ответа.
+Цель: Получать данные из внешнего API через простой GET-запрос.
+Обязательное ядро:
+- requests
+- requests.get()
+- url
+- params
+- headers basics
+- response.status_code
+- response.text
+- timeout
+- простая проверка успешности
+Частотные конструкции:
+- response = requests.get(url, params=params, timeout=10)
+- response.status_code
+- if response.status_code == 200:
+- response.text[:200]
+Типовые ошибки:
+- нет timeout
+- не проверяют status_code
+- params вручную склеивают в строку URL
+- печатают весь огромный ответ
+Пока не трогать:
+- OAuth
+- POST/PUT/DELETE
+- пагинация глубоко
+- асинхронные запросы
+Критерий готовности: Делает GET-запрос с params и проверяет, что ответ успешный.
+
+Блок 6. API: JSON и преобразование в DataFrame.
+Цель: Понимать JSON-ответ и превращать его в таблицу.
+Обязательное ядро:
+- response.json()
+- JSON как dict/list
+- доступ к вложенным ключам
+- pd.DataFrame()
+- pd.json_normalize()
+- выбор нужных полей
+- сохранение результата
+Частотные конструкции:
+- data = response.json()
+- items = data["results"]
+- df = pd.DataFrame(items)
+- df = pd.json_normalize(items)
+Типовые ошибки:
+- ожидают таблицу там, где dict
+- KeyError из-за неверного ключа
+- не смотрят структуру JSON
+- путают list of dicts и dict of lists
+Пока не трогать:
+- сложная рекурсивная нормализация
+- GraphQL
+- streaming API
+Критерий готовности: Извлекает нужный список объектов из JSON и получает DataFrame.
+
+Блок 7. SQL из Python: SQLAlchemy и pd.read_sql.
+Цель: Читать данные из базы в pandas.
+Обязательное ядро:
+- SQLAlchemy engine
+- connection string как секрет
+- pd.read_sql()
+- SELECT
+- WHERE
+- GROUP BY
+- LIMIT
+- параметры запроса basics
+Частотные конструкции:
+- engine = create_engine(connection_string)
+- df = pd.read_sql("SELECT * FROM orders LIMIT 100", engine)
+- query = "SELECT country, SUM(amount) FROM orders GROUP BY country"
+Типовые ошибки:
+- хранят пароль в коде
+- загружают всю огромную таблицу без LIMIT/WHERE
+- SQL syntax error
+- не понимают отличие SQL-фильтра от pandas-фильтра
+Пока не трогать:
+- ORM
+- транзакции
+- оптимизация SQL-планов
+- сложные оконные функции
+Критерий готовности: Читает результат простого SQL-запроса в DataFrame.
+
+Блок 8. ETL: файлы, папки и объединение источников.
+Цель: Собирать много файлов из папки в единый датасет.
+Обязательное ядро:
+- ETL: extract-transform-load
+- pathlib.Path
+- glob
+- цикл по файлам
+- pd.read_csv
+- pd.concat
+- source_file
+- to_csv/to_excel
+Частотные конструкции:
+- files = Path("data").glob("*.csv")
+- frames = []
+- df["source_file"] = file.name
+- result = pd.concat(frames, ignore_index=True)
+Типовые ошибки:
+- путь не существует
+- concat пустого списка
+- не добавляют source_file
+- индексы дублируются без ignore_index
+Пока не трогать:
+- Airflow
+- Prefect
+- dbt
+- production scheduler
+Критерий готовности: Пишет скрипт, который читает все CSV из папки и сохраняет объединённый результат.
+
+Блок 9. ETL: try/except и logging.
+Цель: Делать ETL-скрипт устойчивым к ошибкам и понятным по логам.
+Обязательное ядро:
+- try/except
+- except Exception as e
+- logging
+- logging.info/warning/error
+- log file
+- continue после ошибки
+- итоговая сводка ошибок
+Частотные конструкции:
+- logging.basicConfig(filename="etl.log", level=logging.INFO)
+- try: df = pd.read_csv(file)
+- except Exception as e: logging.error(f"{file}: {e}")
+Типовые ошибки:
+- голый except без логирования
+- скрипт молча пропускает ошибки
+- лог не содержит имени файла
+- ошибка одного файла роняет весь процесс
+Пока не трогать:
+- сложные custom exceptions
+- structured logging
+- monitoring/alerting
+Критерий готовности: Обрабатывает ошибочный файл, пишет лог и продолжает обработку остальных.
+
+Блок 10. Excel-отчеты: несколько листов и pandas ExcelWriter.
+Цель: Генерировать Excel-отчёты с несколькими листами.
+Обязательное ядро:
+- pd.ExcelWriter
+- to_excel
+- sheet_name
+- index=False
+- несколько листов
+- summary/raw/errors
+- имя файла с датой
+Частотные конструкции:
+- with pd.ExcelWriter("report.xlsx") as writer:
+- summary.to_excel(writer, sheet_name="summary", index=False)
+- raw.to_excel(writer, sheet_name="raw", index=False)
+Типовые ошибки:
+- забывают закрыть writer/context manager
+- одинаковые sheet_name
+- index попадает в Excel как лишняя колонка
+- перезаписывают файл
+Пока не трогать:
+- сложные Excel formulas
+- VBA
+- макросы
+Критерий готовности: Создаёт Excel-файл с минимум двумя листами.
+
+Блок 11. Excel и файлы отчёта: форматирование и сохранение графиков.
+Цель: Делать бизнес-отчёт более читаемым: форматирование и картинки.
+Обязательное ядро:
+- openpyxl/xlsxwriter basics
+- ширина колонок
+- freeze panes
+- number format
+- header style basics
+- plt.savefig()
+- png/pdf графики
+Частотные конструкции:
+- worksheet.freeze_panes = "A2"
+- worksheet.column_dimensions["A"].width = 20
+- plt.savefig("sales_trend.png", dpi=150)
+- df.plot(...); plt.savefig(...)
+Типовые ошибки:
+- слишком много ручного форматирования
+- график сохраняется пустым из-за порядка команд
+- не закрывают figure
+- путают формат данных и внешний вид
+Пока не трогать:
+- сложные Excel charts API
+- conditional formatting глубоко
+- PowerPoint export
+Критерий готовности: Форматирует базовые листы и сохраняет графики в папку отчёта.
+
+Блок 12. Производительность: векторизация и оптимизация памяти.
+Цель: Писать код быстрее и экономнее по памяти.
+Обязательное ядро:
+- циклы vs vectorization
+- apply vs vectorization
+- time.perf_counter
+- %%timeit как notebook-инструмент
+- memory_usage
+- astype category
+- int32/float32
+- проверка результата после оптимизации
+Частотные конструкции:
+- df["total"] = df["price"] * df["qty"]
+- df.memory_usage(deep=True)
+- df["country"] = df["country"].astype("category")
+- start = time.perf_counter()
+Типовые ошибки:
+- оптимизируют до проверки правильности
+- используют apply вместо векторизации
+- astype ломает данные
+- экономия памяти ценой потери смысла
+Пока не трогать:
+- numba
+- cython
+- polars
+- parallel processing
+Критерий готовности: Сравнивает два подхода по времени и снижает память через безопасные dtype.
+
+Блок 13. Большие файлы: chunksize и инкрементальная обработка.
+Цель: Обрабатывать файлы, которые нельзя комфортно загрузить целиком.
+Обязательное ядро:
+- pd.read_csv(chunksize=...)
+- chunk iterator
+- обработка чанка
+- накопление агрегатов
+- concat частичных результатов
+- запись результата по частям
+- контроль памяти
+Частотные конструкции:
+- for chunk in pd.read_csv("big.csv", chunksize=100_000):
+- partial = chunk.groupby("country")["amount"].sum()
+- totals = totals.add(partial, fill_value=0)
+Типовые ошибки:
+- concat всех чанков и снова переполнение памяти
+- теряют агрегаты между чанками
+- не учитывают типы при чтении
+- слишком маленький/большой chunksize
+Пока не трогать:
+- Dask
+- Spark
+- distributed computing
+- database warehouse
+Критерий готовности: Читает большой CSV чанками и собирает итоговую агрегацию.
+
+Блок 14. Итоговый проект: автоматизация E-commerce отчёта.
+Цель: Собрать автоматический отчёт из файлов, API, расчётов, Excel и графиков.
+Обязательное ядро:
+- скрипт .py
+- сбор файлов
+- API-курс валют
+- очистка данных
+- выручка
+- средний чек
+- ExcelWriter
+- несколько листов
+- график динамики
+- Report_YYYY-MM-DD.xlsx
+- logging
+Частотные конструкции:
+- run_report.py
+- collect_sales_files()
+- fetch_exchange_rates()
+- build_summary()
+- save_excel_report()
+- Report_YYYY-MM-DD.xlsx
+Типовые ошибки:
+- всё в одной огромной функции
+- нет логов
+- нет проверки входных файлов
+- отчёт зависит от ручных действий
+- нет даты в имени файла
+Пока не трогать:
+- Airflow production DAG
+- Docker
+- CI/CD
+- cloud deployment
+Критерий готовности: Пишет запускаемый скрипт, который собирает данные и создаёт Excel-отчёт.
+
+"""
+
+STAGE_3_FINAL_PROJECT_ECOMMERCE_REPORT = """
+Итоговый проект этапа 3: автоматизация отчёта по E-commerce.
+
+Сценарий:
+Каждое утро в папку приходят несколько файлов с продажами из разных филиалов.
+Нужно написать скрипт, который запускается одной командой и создаёт готовый
+Excel-отчёт для бизнеса.
+
+Обязательные шаги:
+1. Найти все входные CSV/XLSX-файлы в папке.
+2. Прочитать их, добавить source_file и объединить в один DataFrame.
+3. Обработать ошибки чтения файлов через try/except и записать их в лог.
+4. Подтянуть курсы валют через публичный API.
+5. Конвертировать выручку в единую валюту.
+6. Посчитать выручку, количество заказов, средний чек.
+7. Построить динамику продаж по датам.
+8. Сформировать Excel-файл:
+   - лист summary;
+   - лист raw_data;
+   - лист errors/log если были ошибки;
+   - базовое форматирование.
+9. Сохранить график динамики продаж в папку отчёта.
+10. Сохранить файл с именем Report_YYYY-MM-DD.xlsx.
+
+Критерий готовности:
+Скрипт запускается одной командой, не падает на одном битом файле,
+пишет лог, создаёт Excel-отчёт и сохраняет файл с датой в имени.
+"""
+
