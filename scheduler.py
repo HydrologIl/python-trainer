@@ -1,3 +1,4 @@
+from datetime import datetime
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -99,3 +100,21 @@ def get_upcoming_repetitions(
                 )
 
     return sorted(upcoming, key=lambda item: item["date"])
+
+
+def parse_date(value):
+    if value is None:
+        return None
+
+    value = str(value).strip()
+
+    if not value:
+        return None
+
+    for date_format in ("%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(value, date_format).date()
+        except ValueError:
+            continue
+
+    return None
