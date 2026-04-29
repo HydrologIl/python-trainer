@@ -7,7 +7,26 @@ from sheets import update_topic
 from ui_common import reset_session
 
 
-def render_plan_tab(topics: list[dict[str, Any]], today_value: date) -> None:
+def format_topic_option(topic: dict) -> str:
+    stage = topic.get("stage", "")
+    block = topic.get("block", "")
+    title = topic.get("title", "")
+
+    if stage:
+        return f"{stage} · Блок {block}. {title}"
+
+    return f"Блок {block}. {title}"
+
+
+def get_stage_sort_key(stage: str) -> tuple[int, str]:
+    try:
+        number = int(str(stage).replace("Этап", "").strip())
+        return (number, stage)
+    except Exception:
+        return (999, stage)
+
+
+def render_plan_tab(topics: list[dict], today_value: date) -> None:
     st.header("Учебный план")
 
     st.info(
@@ -15,80 +34,177 @@ def render_plan_tab(topics: list[dict[str, Any]], today_value: date) -> None:
         "Изменения сохраняются обратно в лист topics."
     )
 
-    selected_topic_for_edit = st.selectbox(
-        "Тема",
-        topics,
-        format_func=lambda topic: f"Блок {topic['block']}. {topic['title']}",
+    if not topics:
+        st.warning("В учебном плане пока нет тем.")
+        return
+
+    stages = sorted(
+        {
+            topic.get("stage", "Без этапа")
+            for topic in topics
+        },
+        key=get_stage_sort_key,
     )
 
-    current_status = selected_topic_for_edit.get("status", "planned")
-    if current_status not in ["planned", "active", "completed", "paused"]:
-        current_status = "planned"
+    selected_stage = st.selectbox(
+        "Этап обучения",
+        ["Все этапы"] + stages,
+        key="plan_selected_stage",
+    )
 
-    current_learned_date = selected_topic_for_edit.get("learned_date", "")
+    visible_topics = topics
+
+    if selected_stage != "Все этапы":
+        visible_topics = [
+            topic for topic in topics
+            if topic.get("stage", "Без этапа") == selected_stage
+        ]
+
+    if not visible_topics:
+        st.warning("Для выбранного этапа нет тем.")
+        return
+
+    topic = st.selectbox(
+        "Тема",
+        visible_topics,
+        format_func=format_topic_option,
+        key="plan_selected_topic",
+    )
+
+    st.markdown("### Карточка темы")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write(f"**Этап:** {topic.get('stage', '')}")
+        st.write(f"**Блок:** {topic.get('block', '')}")
+        st.write(f"**Тема:** {topic.get('title', '')}")
+
+    with col2:
+        st.write(f"**Статус:** `{topic.get('status', '')}`")
+        learned_date = topic.get("learned_date") or "не указана"
+        st.write(f"**Дата изучения:** {learned_date}")
+        known_blocks = topic.get("known_blocks", [])
+        known_blocks_text = ", ".join(str(block) for block in known_blocks) or "не указаны"
+        st.write(f"**Известные блоки:** {known_blocks_text}")
+
+    description = topic.get("description", "")
+
+    if description:
+        with st.expander("Описание темы", expanded=True):
+            st.write(description)
+
+    status_options = ["planned", "learned", "archived"]
+    current_status = topic.get("status", "planned")
+
+    if current_status not in status_options:
+        status_options.append(current_status)
+
+    status_label_map = {
+        "planned": "запланирована",
+        "learned": "изучена",
+        "archived": "архив",
+    }
 
     status = st.selectbox(
         "Статус",
-        ["planned", "active", "paused", "completed"],
-        index=["planned", "active", "paused", "completed"].index(current_status),
-        format_func=lambda value: {
-            "planned": "запланирована",
-            "active": "пройдена, повторять",
-            "paused": "на паузе",
-            "completed": "закрыта",
-        }[value],
+        status_options,
+        index=status_options.index(current_status),
+        format_func=lambda value: status_label_map.get(value, value),
+        key=f"status_{topic['id']}",
     )
 
-    default_date = (
-        parse_date(current_learned_date)
-        if current_learned_date
-        else today_value
-    )
-
-    learned_date_input = st.date_input(
+    learned_date_input = st.text_input(
         "Дата изучения темы",
-        value=default_date,
+        value=topic.get("learned_date") or today_value.strftime("%Y/%m/%d"),
+        key=f"learned_date_{topic['id']}",
     )
 
-    col_a, col_b = st.columns(2)
+    col_save, col_today, col_clear = st.columns(3)
 
-    with col_a:
-        if st.button("Сохранить дату и статус"):
+    with col_save:
+        if st.button("Сохранить изменения", key=f"save_topic_{topic['id']}"):
             try:
                 update_topic(
-                    selected_topic_for_edit,
-                    learned_date_input.isoformat(),
-                    status,
+                    topic["row_number"],
+                    {
+                        "status": status,
+                        "learned_date": learned_date_input,
+                    },
                 )
                 reset_session()
-                st.success("Сохранено в Google Sheets.")
+                st.cache_data.clear()
+                st.success("Тема обновлена.")
                 st.rerun()
             except Exception as e:
-                st.error("Не удалось сохранить изменения.")
+                st.error("Не удалось обновить тему.")
                 st.code(str(e))
 
-    with col_b:
-        if st.button("Отметить как пройденную сегодня"):
+    with col_today:
+        if st.button("Отметить изученной сегодня", key=f"learned_today_{topic['id']}"):
             try:
                 update_topic(
-                    selected_topic_for_edit,
-                    today_value.isoformat(),
-                    "active",
+                    topic["row_number"],
+                    {
+                        "status": "learned",
+                        "learned_date": today_value.strftime("%Y/%m/%d"),
+                    },
                 )
                 reset_session()
-                st.success("Тема отмечена как пройденная сегодня.")
+                st.cache_data.clear()
+                st.success("Тема отмечена как изученная сегодня.")
                 st.rerun()
             except Exception as e:
-                st.error("Не удалось сохранить изменения.")
+                st.error("Не удалось обновить тему.")
                 st.code(str(e))
 
-    st.subheader("Все темы")
+    with col_clear:
+        if st.button("Снять дату", key=f"clear_date_{topic['id']}"):
+            try:
+                update_topic(
+                    topic["row_number"],
+                    {
+                        "learned_date": "",
+                    },
+                )
+                reset_session()
+                st.cache_data.clear()
+                st.success("Дата изучения очищена.")
+                st.rerun()
+            except Exception as e:
+                st.error("Не удалось очистить дату.")
+                st.code(str(e))
 
-    for topic in topics:
-        st.write(
-            f"**Блок {topic['block']}. {topic['title']}** — "
-            f"статус: `{topic.get('status')}`, "
-            f"дата изучения: `{topic.get('learned_date') or 'не указана'}`, "
-            f"следующее: {get_next_repetition(topic, today_value)}"
+    st.markdown("---")
+
+    st.subheader("Ближайшие повторения по выбранной теме")
+
+    parsed_learned_date = parse_date(topic.get("learned_date"))
+
+    if not parsed_learned_date:
+        st.info("У темы пока нет даты изучения. Повторения не рассчитываются.")
+        return
+
+    upcoming = []
+
+    for repetition_day in [1, 3, 7, 14, 30]:
+        repetition_date = get_next_repetition(
+            parsed_learned_date,
+            repetition_day,
         )
 
+        upcoming.append(
+            {
+                "День": repetition_day,
+                "Дата": repetition_date.strftime("%Y/%m/%d"),
+                "Статус": (
+                    "сегодня"
+                    if repetition_date == today_value
+                    else "прошло"
+                    if repetition_date < today_value
+                    else "впереди"
+                ),
+            }
+        )
+
+    st.table(upcoming)
