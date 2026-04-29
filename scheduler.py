@@ -1,23 +1,41 @@
-from datetime import datetime
 from datetime import date, datetime, timedelta
 from typing import Any
 
 
 REPETITION_DAYS = [1, 3, 7, 14, 30]
+ACTIVE_STATUSES = {"active", "learned"}
 
 
-def parse_date(value: str) -> date:
-    return datetime.strptime(value, "%Y-%m-%d").date()
+def parse_date(value) -> date | None:
+    if value is None:
+        return None
+
+    value = str(value).strip()
+
+    if not value:
+        return None
+
+    for date_format in ("%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(value, date_format).date()
+        except ValueError:
+            continue
+
+    return None
 
 
 def get_repetition_info(topic: dict[str, Any], today: date) -> dict[str, Any] | None:
     status = topic.get("status")
     learned_date_value = topic.get("learned_date")
 
-    if status != "active" or not learned_date_value:
+    if status not in ACTIVE_STATUSES or not learned_date_value:
         return None
 
     learned_date = parse_date(learned_date_value)
+
+    if not learned_date:
+        return None
+
     days_after_learning = (today - learned_date).days
 
     if days_after_learning in REPETITION_DAYS:
@@ -51,7 +69,7 @@ def get_next_repetition(topic: dict[str, Any], today: date) -> str:
     if status == "planned":
         return "тема ещё не отмечена как пройденная"
 
-    if status == "completed":
+    if status in ["completed", "archived"]:
         return "тема закрыта"
 
     if status == "paused":
@@ -61,6 +79,10 @@ def get_next_repetition(topic: dict[str, Any], today: date) -> str:
         return "дата изучения не указана"
 
     learned_date = parse_date(learned_date_value)
+
+    if not learned_date:
+        return "дата изучения указана в неизвестном формате"
+
     days_passed = (today - learned_date).days
 
     if days_passed < 0:
@@ -82,10 +104,13 @@ def get_upcoming_repetitions(
     upcoming = []
 
     for topic in topics:
-        if topic.get("status") != "active" or not topic.get("learned_date"):
+        if topic.get("status") not in ACTIVE_STATUSES or not topic.get("learned_date"):
             continue
 
         learned_date = parse_date(topic["learned_date"])
+
+        if not learned_date:
+            continue
 
         for repetition_day in REPETITION_DAYS:
             repetition_date = learned_date + timedelta(days=repetition_day)
@@ -100,21 +125,3 @@ def get_upcoming_repetitions(
                 )
 
     return sorted(upcoming, key=lambda item: item["date"])
-
-
-def parse_date(value):
-    if value is None:
-        return None
-
-    value = str(value).strip()
-
-    if not value:
-        return None
-
-    for date_format in ("%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y"):
-        try:
-            return datetime.strptime(value, date_format).date()
-        except ValueError:
-            continue
-
-    return None
