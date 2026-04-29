@@ -20,6 +20,9 @@ from curriculum import (
     STAGE_3_CURRICULUM,
     STAGE_3_KNOWLEDGE_MATRIX,
     STAGE_3_FINAL_PROJECT_ECOMMERCE_REPORT,
+    STAGE_4_CURRICULUM,
+    STAGE_4_KNOWLEDGE_MATRIX,
+    STAGE_4_FINAL_PROJECT_DQ_ETL_ML,
 )
 
 
@@ -232,6 +235,15 @@ def build_task_generation_prompt(
 Итоговый проект этапа 3:
 {STAGE_3_FINAL_PROJECT_ECOMMERCE_REPORT}
 
+Детальная программа этапа 4:
+{STAGE_4_CURRICULUM}
+
+Матрица знаний этапа 4:
+{STAGE_4_KNOWLEDGE_MATRIX}
+
+Итоговый проект этапа 4:
+{STAGE_4_FINAL_PROJECT_DQ_ETL_ML}
+
 Текущая тема:
 {topic["stage"]}, блок {topic["block"]}: {topic["title"]}
 
@@ -264,6 +276,7 @@ def build_task_generation_prompt(
 - если текущая тема относится к Этапу 1, используй матрицу этапа 1;
 - если текущая тема относится к Этапу 2, используй матрицу этапа 2;
 - если текущая тема относится к Этапу 3, используй матрицу этапа 3;
+- если текущая тема относится к Этапу 4, используй матрицу этапа 4;
 - если тема не является итоговым проектом, не превращай обычную тренировку в большой проект;
 - не давай подсказок в условиях;
 - не давай решений;
@@ -466,6 +479,15 @@ def build_weak_spot_generation_prompt(
 Итоговый проект этапа 3:
 {STAGE_3_FINAL_PROJECT_ECOMMERCE_REPORT}
 
+Детальная программа этапа 4:
+{STAGE_4_CURRICULUM}
+
+Матрица знаний этапа 4:
+{STAGE_4_KNOWLEDGE_MATRIX}
+
+Итоговый проект этапа 4:
+{STAGE_4_FINAL_PROJECT_DQ_ETL_ML}
+
 Студент уже прошёл блоки:
 {known_blocks}
 
@@ -489,6 +511,7 @@ def build_weak_spot_generation_prompt(
 - если текущая тема относится к Этапу 1, используй матрицу этапа 1;
 - если текущая тема относится к Этапу 2, используй матрицу этапа 2;
 - если текущая тема относится к Этапу 3, используй матрицу этапа 3;
+- если текущая тема относится к Этапу 4, используй матрицу этапа 4;
 - не давай решений;
 - не давай подсказок в условии;
 - язык русский;
