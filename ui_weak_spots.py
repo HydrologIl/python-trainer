@@ -11,7 +11,6 @@ from sheets import (
     save_generated_tasks,
 )
 from ui_common import load_session_into_state
-from ui_today import render_active_session
 from ui_datasets import get_dataset_selector
 
 
@@ -178,7 +177,5 @@ def render_weak_spots_tab(topics: list[dict[str, Any]], today_value: date) -> No
         and st.session_state.get("selected_repetition_day") == -1
         and st.session_state.get("active_session_source") == "weak_spots"
     ):
-        st.markdown("---")
-        st.subheader("Текущая тренировка на слабое место")
-        render_active_session(selected_topic, None)
+        st.info("Тренировка открыта выше, в блоке “Активная сессия”.")
 
