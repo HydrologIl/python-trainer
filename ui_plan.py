@@ -126,11 +126,9 @@ def render_plan_tab(topics: list[dict], today_value: date) -> None:
         if st.button("Сохранить изменения", key=f"save_topic_{topic['id']}"):
             try:
                 update_topic(
-                    topic["row_number"],
-                    {
-                        "status": status,
-                        "learned_date": learned_date_input,
-                    },
+                    topic,
+                    learned_date_input,
+                    status,
                 )
                 reset_session()
                 st.cache_data.clear()
@@ -144,11 +142,9 @@ def render_plan_tab(topics: list[dict], today_value: date) -> None:
         if st.button("Отметить изученной сегодня", key=f"learned_today_{topic['id']}"):
             try:
                 update_topic(
-                    topic["row_number"],
-                    {
-                        "status": "learned",
-                        "learned_date": today_value.strftime("%Y-%m-%d"),
-                    },
+                    topic,
+                    today_value.strftime("%Y-%m-%d"),
+                    "learned",
                 )
                 reset_session()
                 st.cache_data.clear()
@@ -162,10 +158,9 @@ def render_plan_tab(topics: list[dict], today_value: date) -> None:
         if st.button("Снять дату", key=f"clear_date_{topic['id']}"):
             try:
                 update_topic(
-                    topic["row_number"],
-                    {
-                        "learned_date": "",
-                    },
+                    topic,
+                    "",
+                    status,
                 )
                 reset_session()
                 st.cache_data.clear()
