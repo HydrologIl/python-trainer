@@ -34,8 +34,8 @@ TASK_GENERATION_MODELS = [
 
 # Проверка ответов обычно проще, поэтому используем модель дешевле/быстрее.
 FEEDBACK_MODELS = [
-    "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
+    "gemini-2.5-pro",
 ]
 
 # Для отображения в sidebar старого ui.py.
