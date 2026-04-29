@@ -17,6 +17,9 @@ from curriculum import (
     STAGE_2_CURRICULUM,
     STAGE_2_KNOWLEDGE_MATRIX,
     STAGE_2_FINAL_PROJECT_LOYALTY,
+    STAGE_3_CURRICULUM,
+    STAGE_3_KNOWLEDGE_MATRIX,
+    STAGE_3_FINAL_PROJECT_ECOMMERCE_REPORT,
 )
 
 
@@ -220,6 +223,15 @@ def build_task_generation_prompt(
 Итоговый проект этапа 2:
 {STAGE_2_FINAL_PROJECT_LOYALTY}
 
+Детальная программа этапа 3:
+{STAGE_3_CURRICULUM}
+
+Матрица знаний этапа 3:
+{STAGE_3_KNOWLEDGE_MATRIX}
+
+Итоговый проект этапа 3:
+{STAGE_3_FINAL_PROJECT_ECOMMERCE_REPORT}
+
 Текущая тема:
 {topic["stage"]}, блок {topic["block"]}: {topic["title"]}
 
@@ -251,6 +263,7 @@ def build_task_generation_prompt(
 - если текущая тема относится к Этапу 0, используй матрицу этапа 0;
 - если текущая тема относится к Этапу 1, используй матрицу этапа 1;
 - если текущая тема относится к Этапу 2, используй матрицу этапа 2;
+- если текущая тема относится к Этапу 3, используй матрицу этапа 3;
 - если тема не является итоговым проектом, не превращай обычную тренировку в большой проект;
 - не давай подсказок в условиях;
 - не давай решений;
@@ -444,6 +457,15 @@ def build_weak_spot_generation_prompt(
 Итоговый проект этапа 2:
 {STAGE_2_FINAL_PROJECT_LOYALTY}
 
+Детальная программа этапа 3:
+{STAGE_3_CURRICULUM}
+
+Матрица знаний этапа 3:
+{STAGE_3_KNOWLEDGE_MATRIX}
+
+Итоговый проект этапа 3:
+{STAGE_3_FINAL_PROJECT_ECOMMERCE_REPORT}
+
 Студент уже прошёл блоки:
 {known_blocks}
 
@@ -466,6 +488,7 @@ def build_weak_spot_generation_prompt(
 - если текущая тема относится к Этапу 0, используй матрицу этапа 0;
 - если текущая тема относится к Этапу 1, используй матрицу этапа 1;
 - если текущая тема относится к Этапу 2, используй матрицу этапа 2;
+- если текущая тема относится к Этапу 3, используй матрицу этапа 3;
 - не давай решений;
 - не давай подсказок в условии;
 - язык русский;
