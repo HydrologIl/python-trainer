@@ -1905,3 +1905,497 @@ Excel-отчёт для бизнеса.
 пишет лог, создаёт Excel-отчёт и сохраняет файл с датой в имени.
 """
 
+STAGE_4_CURRICULUM = """
+Этап 4: Senior-уровень: системный и стратегический анализ, версия 2.
+
+Блок 1. Архитектура проекта: структура репозитория.
+Цель: организовать аналитический проект так, чтобы его можно было запустить, проверить и поддерживать.
+
+Блок 2. ООП и модули в аналитике.
+Цель: перейти от длинного скрипта к модулям и классам с понятной ответственностью.
+
+Блок 3. Качество кода: PEP8, type hints, линтеры и code review.
+Цель: писать код, который легче читать, тестировать и обсуждать в команде.
+
+Блок 4. Feature Engineering: биннинг и сегментация.
+Цель: превращать числовые признаки в понятные категории и сегменты.
+
+Блок 5. Feature Engineering: expanding и взвешенные окна.
+Цель: создавать исторические признаки по накопленной информации.
+
+Блок 6. Feature Engineering: encoding и нормализация.
+Цель: подготовить категориальные и числовые признаки для модели.
+
+Блок 7. Data Quality: базовые DQ checks.
+Цель: гарантировать, что отчёт или датасет не строится на явно плохих данных.
+
+Блок 8. Data Quality: assert и pandera schemas.
+Цель: описывать ожидания к данным как исполняемые проверки.
+
+Блок 9. Data Quality: стратегии обработки и алерты.
+Цель: выбирать реакцию на плохие данные и сообщать о критичных проблемах.
+
+Блок 10. Оркестрация: DAG, зависимости и расписание.
+Цель: понимать, как аналитический процесс превращается в регулярный управляемый пайплайн.
+
+Блок 11. Оркестрация: Prefect/Airflow basics, логи и мониторинг.
+Цель: запустить простой локальный orchestrated pipeline и увидеть статусы выполнения.
+
+Блок 12. ML для аналитика: подготовка датасета и train/test split.
+Цель: готовить данные для ML-инженера или простой baseline-модели без утечки данных.
+
+Блок 13. ML для аналитика: baseline model, метрики и feature importance.
+Цель: понимать базовый язык ML и уметь обучить простую модель для проверки гипотез.
+
+Блок 14. Итоговый проект: ETL-пайплайн с DQ и ML-ready dataset.
+Цель: собрать senior-level проект: архитектура, DQ, фичи, мониторинг и ML-ready output.
+"""
+
+
+STAGE_4_KNOWLEDGE_MATRIX = """
+Матрица знаний этапа 4.
+Общее правило: генерируй задачи только на обязательное ядро текущего и уже пройденных блоков. Не используй раздел «Пока не трогать».
+
+Блок 1. Архитектура проекта: структура репозитория.
+Цель: Организовать аналитический проект так, чтобы его можно было запустить, проверить и поддерживать.
+Обязательное ядро:
+- структура папок data/src/notebooks/tests
+- requirements.txt
+- README.md
+- config
+- относительные пути
+- .gitignore
+- воспроизводимость проекта
+- разделение raw/processed данных
+Частотные конструкции:
+- project_root / 'data' / 'raw'
+- src/reporting/
+- notebooks/01_eda.ipynb
+- requirements.txt
+- README with run instructions
+Типовые ошибки:
+- всё лежит в одной папке
+- абсолютные локальные пути
+- нет инструкции запуска
+- сырые и обработанные данные перемешаны
+- секреты попали в репозиторий
+Пока не трогать:
+- poetry глубоко
+- Docker
+- CI/CD
+- сложная packaging-система
+Критерий готовности: Студент оформляет репозиторий с понятной структурой и README, проект можно запустить по инструкции.
+
+Блок 2. ООП и модули в аналитике.
+Цель: Перейти от длинного скрипта к модулям и классам с понятной ответственностью.
+Обязательное ядро:
+- module
+- import from local module
+- class
+- __init__
+- self
+- методы класса
+- разделение ответственности
+- ReportGenerator/DataPipeline как паттерны
+Частотные конструкции:
+- class ReportGenerator:
+- def __init__(self, input_path, output_path):
+- def load_data(self):
+- def clean(self):
+- def save(self):
+Типовые ошибки:
+- класс просто оборачивает одну огромную функцию
+- методы слишком зависят от внешних переменных
+- self не используется корректно
+- слишком много ответственности в одном классе
+Пока не трогать:
+- наследование глубоко
+- метаклассы
+- сложные design patterns
+- async classes
+Критерий готовности: Студент разбивает длинный скрипт на модули и простой класс с 3-5 понятными методами.
+
+Блок 3. Качество кода: PEP8, type hints, линтеры и code review.
+Цель: Писать код, который легче читать, тестировать и обсуждать в команде.
+Обязательное ядро:
+- PEP8
+- говорящие имена
+- маленькие функции
+- type hints
+- docstrings
+- pylint/flake8/ruff basics
+- code review checklist
+- конструктивная обратная связь
+Частотные конструкции:
+- def calculate_revenue(df: pd.DataFrame) -> pd.DataFrame:
+- 'Calculate revenue by multiplying price and quantity.'
+- ruff check .
+- review comment: what/why/suggested change
+Типовые ошибки:
+- типизация ради типизации
+- огромные функции
+- непонятные имена x1/x2
+- code review как критика личности
+- линтер исправляет стиль, но не логику
+Пока не трогать:
+- mypy глубоко
+- сложные generic types
+- автоматический CI
+- pre-commit как обязательный инструмент
+Критерий готовности: Студент улучшает читаемость функции, добавляет type hints/docstring и формулирует полезный review-комментарий.
+
+Блок 4. Feature Engineering: биннинг и сегментация.
+Цель: Превращать числовые признаки в понятные категории и сегменты.
+Обязательное ядро:
+- pd.cut()
+- pd.qcut()
+- bins
+- labels
+- равные интервалы vs равные группы
+- RFM-сегменты
+- duplicates='drop'
+- интерпретация сегментов
+Частотные конструкции:
+- pd.cut(df["age"], bins=[0, 18, 35, 60, 100], labels=["child", "young", "adult", "senior"])
+- pd.qcut(df["amount"], q=4, labels=["Low", "Medium", "High", "VIP"])
+Типовые ошибки:
+- путают cut и qcut
+- labels не совпадают с bins
+- qcut падает из-за дублей
+- сегменты не интерпретированы бизнесово
+Пока не трогать:
+- сложный target encoding
+- WOE/IV
+- feature stores
+Критерий готовности: Студент создаёт сегменты через cut/qcut и объясняет, что означает каждый сегмент.
+
+Блок 5. Feature Engineering: expanding и взвешенные окна.
+Цель: Создавать исторические признаки по накопленной информации.
+Обязательное ядро:
+- .expanding()
+- накопительный максимум/среднее/сумма
+- история клиента
+- sort_values по дате
+- groupby + expanding
+- weighted moving average как ручной расчёт
+Частотные конструкции:
+- df["cum_max_profit"] = df["profit"].expanding().max()
+- df["client_cum_amount"] = df.groupby("client_id")["amount"].expanding().sum().reset_index(level=0, drop=True)
+- weighted_avg = (values * weights).sum() / weights.sum()
+Типовые ошибки:
+- expanding без сортировки по времени
+- смешивают клиентов при расчёте истории
+- leakage: используют будущие данные
+- не сбрасывают индекс после groupby expanding
+Пока не трогать:
+- сложные rolling windows с custom indexer
+- feature stores
+- online features
+Критерий готовности: Студент создаёт 2-3 исторических признака без утечки будущего.
+
+Блок 6. Feature Engineering: encoding и нормализация.
+Цель: Подготовить категориальные и числовые признаки для модели.
+Обязательное ядро:
+- pd.get_dummies()
+- one-hot encoding
+- drop_first basics
+- normalization/scaling idea
+- train/test-aware preprocessing
+- leakage
+- fit on train / transform test как принцип
+Частотные конструкции:
+- pd.get_dummies(df["segment"], prefix="segment")
+- features = pd.concat([df, dummies], axis=1)
+- df["amount_scaled"] = (df["amount"] - df["amount"].mean()) / df["amount"].std()
+Типовые ошибки:
+- fit preprocessing на всём датасете
+- категории test не совпали с train
+- one-hot для слишком высококардинального признака
+- нормализация без понимания зачем
+Пока не трогать:
+- sklearn Pipeline глубоко
+- TargetEncoder
+- feature hashing
+- production feature store
+Критерий готовности: Студент создаёт one-hot признаки и объясняет риск leakage.
+
+Блок 7. Data Quality: базовые DQ checks.
+Цель: Гарантировать, что отчёт или датасет не строится на явно плохих данных.
+Обязательное ядро:
+- DQ checks
+- null check
+- type check
+- range check
+- duplicate check
+- unique ID check
+- referential integrity basics
+- DQ report
+Частотные конструкции:
+- df["id"].isna().sum()
+- df["price"].lt(0).sum()
+- df["order_id"].duplicated().sum()
+- set(child_ids) - set(parent_ids)
+Типовые ошибки:
+- проверяют только null
+- не разделяют warning и critical
+- нет отчёта о проверках
+- проверка есть, но результат игнорируется
+Пока не трогать:
+- Great Expectations
+- сложные DQ платформы
+- data contracts глубоко
+Критерий готовности: Студент пишет набор базовых DQ-проверок и формирует короткий отчёт по ним.
+
+Блок 8. Data Quality: assert и pandera schemas.
+Цель: Описывать ожидания к данным как исполняемые проверки.
+Обязательное ядро:
+- assert
+- custom validation function
+- pandera DataFrameSchema
+- Column
+- Check
+- schema.validate()
+- readable validation errors
+Частотные конструкции:
+- assert (df["price"] >= 0).all()
+- schema = pa.DataFrameSchema({"price": pa.Column(float, pa.Check.ge(0))})
+- validated_df = schema.validate(df)
+Типовые ошибки:
+- assert отключаем в production-флагах Python
+- ошибка валидации непонятна пользователю
+- схема слишком строгая/слишком слабая
+- валидация после трансформации вместо до неё
+Пока не трогать:
+- Great Expectations
+- сложные custom pandera checks
+- data contracts между командами
+Критерий готовности: Студент описывает схему данных и валидирует DataFrame через assert или pandera.
+
+Блок 9. Data Quality: стратегии обработки и алерты.
+Цель: Выбирать реакцию на плохие данные и сообщать о критичных проблемах.
+Обязательное ядро:
+- fail fast
+- skip bad records
+- fix/replace
+- quarantine table
+- error table
+- critical vs warning
+- alert message
+- logging error
+- pipeline stop
+Частотные конструкции:
+- if critical_errors: raise ValueError("DQ failed")
+- bad_rows.to_csv("bad_records.csv", index=False)
+- logging.error("Negative prices found: %s", count)
+Типовые ошибки:
+- все ошибки одинаково критичны
+- плохие строки просто удаляются без следа
+- нет сообщения, что именно сломалось
+- пайплайн продолжает работу после критичной ошибки
+Пока не трогать:
+- Slack/email integration как обязательная реализация
+- incident management
+- observability платформы
+Критерий готовности: Студент проектирует DQ-стратегию: что останавливает процесс, что логируется, что уходит в quarantine.
+
+Блок 10. Оркестрация: DAG, зависимости и расписание.
+Цель: Понимать, как аналитический процесс превращается в регулярный управляемый пайплайн.
+Обязательное ядро:
+- DAG
+- task
+- dependency
+- schedule
+- cron basics
+- idempotency
+- retry
+- backfill
+- extract-validate-transform-load order
+Частотные конструкции:
+- extract >> validate >> transform >> load
+- schedule: every Sunday 23:00
+- retry failed task
+- idempotent output path
+Типовые ошибки:
+- нет явных зависимостей
+- таски неидемпотентны
+- повторный запуск дублирует данные
+- расписание есть, но нет логов/проверок
+Пока не трогать:
+- сложные Airflow sensors
+- dynamic DAGs
+- KubernetesExecutor
+Критерий готовности: Студент рисует DAG процесса и объясняет зависимости, расписание и retry.
+
+Блок 11. Оркестрация: Prefect/Airflow basics, логи и мониторинг.
+Цель: Запустить простой локальный orchestrated pipeline и увидеть статусы выполнения.
+Обязательное ядро:
+- Prefect flow/task или Airflow DAG/task
+- локальный запуск
+- task status
+- logs
+- monitoring basics
+- rerun failed task
+- schedule basics
+Частотные конструкции:
+- @flow
+- @task
+- flow.run / python flow.py
+- logging.info('Start processing')
+- task failed / task success
+Типовые ошибки:
+- оркестратор используется как обычный скрипт без тасков
+- логи неинформативны
+- нет границ задач
+- сложно перезапустить только упавший шаг
+Пока не трогать:
+- production Airflow deployment
+- Docker/Kubernetes
+- секреты в Airflow Variables глубоко
+Критерий готовности: Студент запускает локальный flow/DAG из 3-4 задач с логами и понятными статусами.
+
+Блок 12. ML для аналитика: подготовка датасета и train/test split.
+Цель: Готовить данные для ML-инженера или простой baseline-модели без утечки данных.
+Обязательное ядро:
+- target
+- features
+- X/y
+- train_test_split
+- random_state
+- leakage
+- baseline dataset
+- исключение ID/будущих колонок
+- schema of ML dataset
+Частотные конструкции:
+- X = df[feature_cols]
+- y = df["target"]
+- train_test_split(X, y, test_size=0.2, random_state=42)
+- feature_cols = [c for c in df.columns if c not in ["target", "id"]]
+Типовые ошибки:
+- target попал в features
+- будущие данные попали в признаки
+- ID используется как признак без смысла
+- нет фиксированного random_state
+- split после scaling на всех данных
+Пока не трогать:
+- cross-validation глубоко
+- time-series split
+- feature selection algorithms
+Критерий готовности: Студент готовит X/y, делает train/test split и объясняет, где может быть leakage.
+
+Блок 13. ML для аналитика: baseline model, метрики и feature importance.
+Цель: Понимать базовый язык ML и уметь обучить простую модель для проверки гипотез.
+Обязательное ядро:
+- LinearRegression
+- LogisticRegression
+- fit
+- predict
+- MAE
+- RMSE
+- accuracy
+- coefficients
+- feature importance idea
+- интерпретация модели осторожно
+Частотные конструкции:
+- model.fit(X_train, y_train)
+- pred = model.predict(X_test)
+- mean_absolute_error(y_test, pred)
+- model.coef_
+- accuracy_score(y_test, pred)
+Типовые ошибки:
+- путают regression и classification
+- оценивают модель на train
+- интерпретируют коэффициенты без учёта scaling
+- feature importance как причинность
+Пока не трогать:
+- XGBoost tuning
+- GridSearchCV
+- deep learning
+- production ML serving
+Критерий готовности: Студент обучает baseline, считает простую метрику и объясняет ограничения результата.
+
+Блок 14. Итоговый проект: ETL-пайплайн с DQ и ML-ready dataset.
+Цель: Собрать senior-level проект: архитектура, DQ, фичи, мониторинг и ML-ready output.
+Обязательное ядро:
+- project structure
+- classes/modules
+- extract
+- validate
+- transform
+- load
+- monitor
+- DQ checks
+- feature engineering
+- golden dataset
+- logs
+- README
+- tests basics
+Частотные конструкции:
+- DataPipeline.extract()
+- DataValidator.validate()
+- FeatureBuilder.transform()
+- processed_data/golden_dataset.csv
+- pipeline.log
+- README run instructions
+Типовые ошибки:
+- нет DQ до transform
+- всё в одном файле
+- нет логов
+- processed data нельзя воспроизвести
+- README не объясняет запуск
+- критичные ошибки не останавливают pipeline
+Пока не трогать:
+- production Airflow deployment
+- Docker/CI/CD
+- feature store
+- online ML
+Критерий готовности: Студент оформляет воспроизводимый ETL-проект с DQ, логами, фичами и чистым датасетом для ML.
+
+"""
+
+STAGE_4_FINAL_PROJECT_DQ_ETL_ML = """
+Итоговый проект этапа 4: ETL-пайплайн с системой качества данных и ML-ready dataset.
+
+Сценарий:
+Ты ведущий аналитик в финтехе. Нужно построить систему, которая забирает сырые
+данные, проверяет их качество, создаёт признаки и сохраняет чистый датасет
+для ML-моделирования.
+
+Обязательные шаги:
+1. Extract:
+   - прочитать сырые данные из CSV или SQL-эмуляции;
+   - сохранить источник и дату запуска.
+
+2. Validate:
+   - проверить null в критичных колонках;
+   - проверить уникальность ID;
+   - проверить дубли;
+   - проверить диапазоны значений;
+   - при критичных ошибках остановить процесс;
+   - записать DQ report.
+
+3. Transform:
+   - создать сегменты через cut/qcut;
+   - создать исторические признаки через expanding/rolling при необходимости;
+   - подготовить one-hot признаки;
+   - защититься от leakage.
+
+4. Load:
+   - сохранить golden dataset в processed_data;
+   - сохранить отдельный файл с bad records, если они есть.
+
+5. Monitor:
+   - писать подробный лог работы;
+   - фиксировать start/finish/errors;
+   - показывать количество строк на каждом этапе.
+
+6. Code:
+   - оформить проект в виде модулей и классов;
+   - добавить README;
+   - добавить requirements.txt;
+   - добавить базовые тесты/проверки.
+
+Критерий готовности:
+Проект воспроизводимо запускается одной командой, не пропускает критичные DQ-ошибки,
+пишет лог, создаёт golden dataset и оформлен как поддерживаемый репозиторий.
+"""
+
