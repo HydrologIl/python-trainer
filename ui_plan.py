@@ -1,8 +1,8 @@
-from datetime import date
+from datetime import date, timedelta
 
 import streamlit as st
 
-from scheduler import get_next_repetition, parse_date
+from scheduler import parse_date
 from sheets import update_topic
 from ui_common import reset_session
 
@@ -183,10 +183,7 @@ def render_plan_tab(topics: list[dict], today_value: date) -> None:
     upcoming = []
 
     for repetition_day in [1, 3, 7, 14, 30]:
-        repetition_date = get_next_repetition(
-            parsed_learned_date,
-            repetition_day,
-        )
+        repetition_date = parsed_learned_date + timedelta(days=repetition_day)
 
         upcoming.append(
             {
