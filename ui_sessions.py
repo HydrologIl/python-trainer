@@ -4,7 +4,6 @@ import streamlit as st
 
 from sheets import load_sessions, load_tasks
 from ui_common import load_session_into_state
-from ui_today import render_active_session
 
 
 def render_sessions_tab(topics: list[dict[str, Any]]) -> None:
@@ -22,28 +21,6 @@ def render_sessions_tab(topics: list[dict[str, Any]]) -> None:
             topic["id"]: topic
             for topic in topics
         }
-
-        current_session_id = st.session_state.get("current_session_id")
-
-        if current_session_id:
-            current_session = next(
-                (
-                    session for session in sessions
-                    if session["session_id"] == current_session_id
-                ),
-                None,
-            )
-
-            if (
-                current_session
-                and st.session_state.get("active_session_source") == "sessions"
-            ):
-                current_topic = topic_by_id.get(current_session["topic_id"])
-
-                if current_topic:
-                    st.subheader("Открытая сессия")
-                    render_active_session(current_topic, current_session)
-                    st.markdown("---")
 
         st.subheader("Все сессии")
 
