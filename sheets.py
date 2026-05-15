@@ -17,6 +17,13 @@ MISTAKES_SHEET_NAME = "mistakes"
 TASK_FEEDBACK_SHEET_NAME = "task_feedback"
 DATASETS_SHEET_NAME = "datasets"
 
+CORRECT_STATUSES = {"correct", "answered"}
+ANSWERED_STATUSES = {"correct", "partially_correct", "incorrect", "answered"}
+CLOSED_STATUSES = {"correct", "answered", "skipped", "bad_task"}
+VALID_TASK_TYPES = {"debug", "output_prediction", "write_code"}
+EXPECTED_TASK_COUNTS = {"debug": 10, "output_prediction": 10, "write_code": 20}
+
+
 
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -26,6 +33,96 @@ def normalize_cell(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def task_status_from_verdict(verdict: Any) -> str:
+    normalized = normalize_verdict(verdict)
+
+    if normalized == "correct":
+        return "correct"
+
+    if normalized == "partially_correct":
+        return "partially_correct"
+
+    if normalized == "incorrect":
+        return "incorrect"
+
+    return "incorrect"
+
+
+def is_task_answered(task: dict[str, Any]) -> bool:
+    return task.get("status") in ANSWERED_STATUSES
+
+
+def is_task_closed(task: dict[str, Any]) -> bool:
+    return task.get("status") in CLOSED_STATUSES
+
+
+def validate_generated_tasks(
+    generated_tasks: list[dict[str, Any]],
+    expected_total: int | None = 40,
+) -> list[dict[str, Any]]:
+    if not isinstance(generated_tasks, list):
+        raise ValueError("Gemini должен вернуть список задач, но вернул другой формат.")
+
+    if expected_total is not None and len(generated_tasks) != expected_total:
+        raise ValueError(
+            f"Gemini вернул {len(generated_tasks)} задач вместо {expected_total}. "
+            "Сессию не сохраняю, чтобы не портить учебный план."
+        )
+
+    errors = []
+    type_counts = {task_type: 0 for task_type in VALID_TASK_TYPES}
+    normalized_tasks: list[dict[str, Any]] = []
+
+    for index, task in enumerate(generated_tasks, start=1):
+        if not isinstance(task, dict):
+            errors.append(f"Задача {index}: ожидается объект/dict.")
+            continue
+
+        task_type = normalize_cell(task.get("type"))
+        difficulty = normalize_cell(task.get("difficulty"))
+        task_text = normalize_cell(task.get("task"))
+        code = normalize_cell(task.get("code"))
+
+        if task_type not in VALID_TASK_TYPES:
+            errors.append(
+                f"Задача {index}: неизвестный тип `{task_type}`. "
+                f"Разрешены: {', '.join(sorted(VALID_TASK_TYPES))}."
+            )
+        else:
+            type_counts[task_type] += 1
+
+        if not task_text:
+            errors.append(f"Задача {index}: пустое условие.")
+
+        if task_type in {"debug", "output_prediction"} and not code:
+            errors.append(f"Задача {index}: для типа `{task_type}` нужен непустой code.")
+
+        normalized_tasks.append(
+            {
+                "type": task_type,
+                "difficulty": difficulty,
+                "task": task_text,
+                "code": code,
+            }
+        )
+
+    if expected_total == 40:
+        for task_type, expected_count in EXPECTED_TASK_COUNTS.items():
+            actual_count = type_counts.get(task_type, 0)
+            if actual_count != expected_count:
+                errors.append(
+                    f"Тип `{task_type}`: {actual_count} задач вместо {expected_count}."
+                )
+
+    if errors:
+        error_preview = "\n".join(f"- {error}" for error in errors[:20])
+        if len(errors) > 20:
+            error_preview += f"\n- ...и ещё {len(errors) - 20} проблем."
+        raise ValueError("Сгенерированные задачи не прошли валидацию:\n" + error_preview)
+
+    return normalized_tasks
 
 
 def parse_known_blocks(value: Any) -> list[int]:
@@ -544,25 +641,31 @@ def get_latest_answer_for_task(task_id: str) -> dict[str, Any] | None:
 
 def get_session_progress(tasks: list[dict[str, Any]]) -> dict[str, int]:
     total = len(tasks)
-    answered = len([task for task in tasks if task.get("status") == "answered"])
+    correct = len([task for task in tasks if task.get("status") in CORRECT_STATUSES])
+    partial = len([task for task in tasks if task.get("status") == "partially_correct"])
+    incorrect = len([task for task in tasks if task.get("status") == "incorrect"])
+    answered = correct + partial + incorrect
     skipped = len([task for task in tasks if task.get("status") == "skipped"])
     bad_tasks = len([task for task in tasks if task.get("status") == "bad_task"])
-    remaining = total - answered - skipped - bad_tasks
+    completed = correct + skipped + bad_tasks
+    remaining = total - completed
 
     return {
         "total": total,
         "answered": answered,
+        "correct": correct,
+        "partially_correct": partial,
+        "incorrect": incorrect,
         "skipped": skipped,
         "bad_tasks": bad_tasks,
+        "completed": completed,
         "remaining": remaining,
     }
 
 
 def get_first_unanswered_index(tasks: list[dict[str, Any]]) -> int:
-    closed_statuses = {"answered", "skipped", "bad_task"}
-
     for index, task in enumerate(tasks):
-        if task.get("status") not in closed_statuses:
+        if not is_task_closed(task):
             return index
 
     return len(tasks)
@@ -598,7 +701,9 @@ def save_generated_tasks(
     topic: dict[str, Any],
     repetition_day: int,
     generated_tasks: list[dict[str, Any]],
+    expected_total: int | None = 40,
 ) -> None:
+    generated_tasks = validate_generated_tasks(generated_tasks, expected_total=expected_total)
     worksheet = get_worksheet(TASKS_SHEET_NAME)
 
     rows = []
@@ -655,8 +760,18 @@ def build_progress_stats(
     total_tasks = len(valid_tasks)
     answered_tasks = len([
         task for task in valid_tasks
-        if task.get("status") == "answered"
+        if is_task_answered(task)
     ])
+
+    valid_task_ids = {task["task_id"] for task in valid_tasks}
+    valid_answers = [
+        answer for answer in answers
+        if answer.get("task_id") in valid_task_ids
+    ]
+
+    latest_answer_by_task: dict[str, dict[str, Any]] = {}
+    for answer in sorted(valid_answers, key=lambda item: item.get("created_at", "")):
+        latest_answer_by_task[answer["task_id"]] = answer
 
     verdict_counts = {
         "correct": 0,
@@ -665,13 +780,7 @@ def build_progress_stats(
         "unknown": 0,
     }
 
-    valid_task_ids = {task["task_id"] for task in valid_tasks}
-    valid_answers = [
-        answer for answer in answers
-        if answer.get("task_id") in valid_task_ids
-    ]
-
-    for answer in valid_answers:
+    for answer in latest_answer_by_task.values():
         verdict = normalize_verdict(answer.get("verdict", "unknown"))
         if verdict not in verdict_counts:
             verdict = "unknown"
@@ -693,6 +802,7 @@ def build_progress_stats(
                 "correct": 0,
                 "partial": 0,
                 "incorrect": 0,
+                "attempts": 0,
             }
 
         if task.get("status") == "bad_task":
@@ -701,11 +811,19 @@ def build_progress_stats(
 
         topic_stats[topic_id]["total"] += 1
 
-        if task.get("status") == "answered":
+        if is_task_answered(task):
             topic_stats[topic_id]["answered"] += 1
 
     for answer in valid_answers:
         task = tasks_by_id.get(answer["task_id"])
+        if not task:
+            continue
+        topic_id = task["topic_id"]
+        if topic_id in topic_stats:
+            topic_stats[topic_id]["attempts"] += 1
+
+    for task_id, answer in latest_answer_by_task.items():
+        task = tasks_by_id.get(task_id)
         if not task:
             continue
 
@@ -727,7 +845,8 @@ def build_progress_stats(
         "answered_tasks": answered_tasks,
         "bad_tasks_count": bad_tasks_count,
         "sessions_count": len(sessions),
-        "answers_count": len(valid_answers),
+        "answers_count": len(latest_answer_by_task),
+        "attempts_count": len(valid_answers),
         "verdict_counts": verdict_counts,
         "topic_stats": topic_stats,
     }
