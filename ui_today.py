@@ -39,6 +39,16 @@ from ui_datasets import get_dataset_selector
 def render_today_tab(topics: list[dict[str, Any]], today_value: date) -> None:
     st.header("Сегодня")
 
+    # Если сессия открыта сверху из другой вкладки, не трогаем session_state здесь.
+    # Streamlit tabs выполняют код всех вкладок, поэтому эта вкладка может случайно
+    # закрыть активную сессию, даже когда пользователь работает с блоком наверху.
+    if (
+        st.session_state.get("current_session_id")
+        and st.session_state.get("active_session_source") not in [None, "today"]
+    ):
+        st.info("Активная сессия открыта выше. Закрой её, чтобы вернуться к экрану “Сегодня”.")
+        return
+
     try:
         sessions = load_sessions()
     except Exception:
@@ -484,7 +494,10 @@ def handle_check_answer(
             st.session_state["tasks"] = refreshed_tasks
 
             st.success("Ответ, фидбек и статус задачи сохранены.")
-            st.rerun()
+            # Не вызываем st.rerun() сразу после проверки.
+            # На телефоне rerun может привести к тому, что активная сессия визуально
+            # схлопнется раньше, чем пользователь увидит фидбек. Фидбек уже сохранён
+            # в session_state и будет показан ниже в этом же проходе рендера.
         except Exception as e:
             st.error("Не удалось получить или сохранить фидбек.")
             st.code(str(e))
