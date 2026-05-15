@@ -32,7 +32,7 @@ def render_sessions_tab(topics: list[dict[str, Any]]) -> None:
 
             answered_count = len([
                 task for task in session_tasks
-                if task.get("status") == "answered"
+                if task.get("status") in ["answered", "correct", "partially_correct", "incorrect"]
             ])
 
             skipped_count = len([
