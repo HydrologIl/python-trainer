@@ -4,6 +4,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+from gemini_service import normalize_verdict
 from scheduler import get_upcoming_repetitions
 from sheets import (
     build_progress_stats,
@@ -31,6 +32,7 @@ def render_overview_metrics(stats: dict) -> None:
     total_tasks = safe_int(stats.get("total_tasks", 0))
     answered_tasks = safe_int(stats.get("answered_tasks", 0))
     answers_count = safe_int(stats.get("answers_count", 0))
+    attempts_count = safe_int(stats.get("attempts_count", answers_count))
     bad_tasks_count = safe_int(stats.get("bad_tasks_count", 0))
 
     verdict_counts = stats.get("verdict_counts", {})
@@ -45,10 +47,11 @@ def render_overview_metrics(stats: dict) -> None:
     col3.metric("Ошибок", incorrect)
     col4.metric("Плохих задач", bad_tasks_count)
 
-    col5, col6, col7 = st.columns(3)
+    col5, col6, col7, col8 = st.columns(4)
     col5.metric("Correct", correct)
     col6.metric("Partially correct", partial)
     col7.metric("Incorrect", incorrect)
+    col8.metric("Проверок всего", attempts_count)
 
 
 def build_topic_progress_table(stats: dict) -> pd.DataFrame:
@@ -61,6 +64,7 @@ def build_topic_progress_table(stats: dict) -> pd.DataFrame:
         partial = safe_int(topic_stat.get("partial", 0))
         incorrect = safe_int(topic_stat.get("incorrect", 0))
         bad_tasks = safe_int(topic_stat.get("bad_tasks", 0))
+        attempts = safe_int(topic_stat.get("attempts", 0))
 
         checked = correct + partial + incorrect
 
@@ -74,6 +78,7 @@ def build_topic_progress_table(stats: dict) -> pd.DataFrame:
                 "Partial": partial,
                 "Incorrect": incorrect,
                 "Качество correct, %": percent(correct, checked),
+                "Проверок": attempts,
                 "Плохие задачи": bad_tasks,
             }
         )
@@ -106,7 +111,15 @@ def build_active_sessions_table(
         total = len(session_tasks)
         answered = len([
             task for task in session_tasks
-            if task.get("status") == "answered"
+            if task.get("status") in ["answered", "correct", "partially_correct", "incorrect"]
+        ])
+        correct = len([
+            task for task in session_tasks
+            if task.get("status") in ["answered", "correct"]
+        ])
+        needs_retry = len([
+            task for task in session_tasks
+            if task.get("status") in ["partially_correct", "incorrect"]
         ])
         skipped = len([
             task for task in session_tasks
@@ -130,9 +143,11 @@ def build_active_sessions_table(
                 "Тема": topic.get("title", session.get("topic_id", "")),
                 "Тип": repetition_label,
                 "Дата": session.get("scheduled_date", ""),
-                "Решено": answered,
+                "Ответов": answered,
+                "Зачтено": correct,
+                "На повтор": needs_retry,
                 "Всего": total,
-                "Прогресс, %": percent(answered, total),
+                "Прогресс, %": percent(correct + skipped + bad, total),
                 "Пропущено": skipped,
                 "Плохие": bad,
                 "Статус": session.get("status", ""),
@@ -176,6 +191,111 @@ def build_mistake_tables(
     ]
 
     return pd.DataFrame(type_rows), pd.DataFrame(topic_rows)
+
+
+def get_latest_answers_by_task(answers: list[dict]) -> dict[str, dict]:
+    latest: dict[str, dict] = {}
+    for answer in sorted(answers, key=lambda item: item.get("created_at", "")):
+        latest[answer.get("task_id", "")] = answer
+    return latest
+
+
+def build_task_type_table(tasks: list[dict], answers: list[dict]) -> pd.DataFrame:
+    latest_answers = get_latest_answers_by_task(answers)
+    rows_by_type: dict[str, dict] = defaultdict(lambda: {
+        "total": 0,
+        "attempted": 0,
+        "correct": 0,
+        "partial": 0,
+        "incorrect": 0,
+        "bad": 0,
+    })
+
+    for task in tasks:
+        task_type = task.get("type") or "unknown"
+        row = rows_by_type[task_type]
+
+        if task.get("status") == "bad_task":
+            row["bad"] += 1
+            continue
+
+        row["total"] += 1
+        latest_answer = latest_answers.get(task.get("task_id"))
+
+        if not latest_answer:
+            continue
+
+        row["attempted"] += 1
+        verdict = normalize_verdict(latest_answer.get("verdict", "unknown"))
+
+        if verdict == "correct":
+            row["correct"] += 1
+        elif verdict == "partially_correct":
+            row["partial"] += 1
+        elif verdict == "incorrect":
+            row["incorrect"] += 1
+
+    rows = []
+    for task_type, data in rows_by_type.items():
+        checked = data["correct"] + data["partial"] + data["incorrect"]
+        rows.append(
+            {
+                "Тип задач": task_type,
+                "Всего": data["total"],
+                "С попытками": data["attempted"],
+                "Correct": data["correct"],
+                "Partial": data["partial"],
+                "Incorrect": data["incorrect"],
+                "Качество correct, %": percent(data["correct"], checked),
+                "Плохие задачи": data["bad"],
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows).sort_values("Качество correct, %", ascending=True)
+
+
+def build_answer_trend_table(answers: list[dict]) -> pd.DataFrame:
+    rows_by_date: dict[str, dict] = defaultdict(lambda: {
+        "correct": 0,
+        "partial": 0,
+        "incorrect": 0,
+        "total": 0,
+    })
+
+    for answer in answers:
+        created_at = answer.get("created_at", "")
+        day = created_at[:10] if len(created_at) >= 10 else "unknown"
+        verdict = normalize_verdict(answer.get("verdict", "unknown"))
+        row = rows_by_date[day]
+        row["total"] += 1
+
+        if verdict == "correct":
+            row["correct"] += 1
+        elif verdict == "partially_correct":
+            row["partial"] += 1
+        elif verdict == "incorrect":
+            row["incorrect"] += 1
+
+    rows = []
+    for day, data in rows_by_date.items():
+        rows.append(
+            {
+                "Дата": day,
+                "Проверок": data["total"],
+                "Correct": data["correct"],
+                "Partial": data["partial"],
+                "Incorrect": data["incorrect"],
+                "Качество correct, %": percent(data["correct"], data["total"]),
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows).sort_values("Дата", ascending=False)
 
 
 def build_upcoming_table(topics: list[dict], today_value: date) -> pd.DataFrame:
@@ -227,6 +347,34 @@ def render_progress_tab(topics: list[dict], today_value: date) -> None:
         else:
             st.dataframe(
                 topic_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        st.markdown("---")
+
+        st.subheader("Качество по типам задач")
+        task_type_df = build_task_type_table(tasks, answers)
+
+        if task_type_df.empty:
+            st.info("Пока нет данных по типам задач.")
+        else:
+            st.dataframe(
+                task_type_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        st.markdown("---")
+
+        st.subheader("Динамика проверок")
+        trend_df = build_answer_trend_table(answers)
+
+        if trend_df.empty:
+            st.info("Пока нет истории проверок.")
+        else:
+            st.dataframe(
+                trend_df.head(14),
                 use_container_width=True,
                 hide_index=True,
             )
