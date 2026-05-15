@@ -11,11 +11,10 @@ def render_active_session_top(topics: list[dict]) -> None:
     if not current_session_id:
         return
 
-    # Обычные сессии из вкладки “Сегодня” оставляем во вкладке “Сегодня”.
-    # Наверх выносим только сессии, открытые из “Сессии” или “Слабые места”,
-    # потому что именно они на телефоне схлопывались при rerun.
-    if active_source not in ["sessions", "weak_spots"]:
-        return
+    # Защита от Streamlit rerun, особенно на телефоне.
+    # Если активная сессия есть в session_state, показываем её сверху независимо
+    # от того, из какой вкладки она была открыта. Иначе после нажатия кнопок
+    # внутри вкладок сессия может визуально “закрываться”.
 
     try:
         sessions = load_sessions()
@@ -51,6 +50,10 @@ def render_active_session_top(topics: list[dict]) -> None:
         st.caption("Открыта тренировка “Слабые места”.")
     elif active_source == "sessions":
         st.caption("Открыта из списка сессий.")
+    elif active_source == "today":
+        st.caption("Открыта из вкладки “Сегодня”.")
+    else:
+        st.caption("Открыта активная сессия.")
 
     render_active_session(current_topic, current_session)
     st.markdown("---")
