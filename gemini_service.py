@@ -77,6 +77,53 @@ def format_dataset_context(dataset: dict[str, Any] | None) -> str:
 """
 
 
+
+def format_difficulty_profile(profile: str | None) -> str:
+    profile = normalize_cell(profile or "balanced")
+
+    profiles = {
+        "balanced": """
+Режим сложности: сбалансированный.
+- 30% задач — простые разогревочные;
+- 50% задач — рабочие задачи уровня тестового задания для аналитика;
+- 20% задач — чуть сложнее базового уровня, но без выхода за изученные конструкции.
+""",
+        "harder": """
+Режим сложности: сложнее обычного.
+- Не делай однотипные задачи на один if/else.
+- Добавляй небольшие комбинации: функция + условие, функция + цикл, список + фильтрация, словарь + подсчёт, обработка граничного случая.
+- Задачи должны оставаться решаемыми изученными средствами, но требовать подумать над структурой решения.
+- Избегай больших проектов: это короткие задачи, но с более плотной логикой.
+""",
+        "interview": """
+Режим сложности: ближе к Python-тестам для аналитика данных.
+- Формулируй задачи как маленькие рабочие кейсы: метрики, клиенты, заказы, HR, маркетинг, финансы.
+- Включай функции, возврат значений, преобразование коллекций, проверку граничных случаев.
+- Не усложняй за пределы уже изученных тем, но убирай учебную механистичность.
+""",
+    }
+
+    return profiles.get(profile, profiles["balanced"])
+
+
+def format_topic_materials_context(materials_context: str | None) -> str:
+    materials_context = normalize_cell(materials_context)
+
+    if not materials_context:
+        return "Дополнительные материалы по теме не переданы."
+
+    max_chars = 12000
+    if len(materials_context) > max_chars:
+        materials_context = materials_context[:max_chars] + "\n...[материалы обрезаны по лимиту]"
+
+    return f"""
+Дополнительные материалы, по которым студент изучал эту тему.
+Используй их как источник терминов, объяснений, типов задач и уровня сложности.
+Не копируй текст дословно, а генерируй новые задачи по тем же понятиям и паттернам.
+
+{materials_context}
+"""
+
 def normalize_verdict(value: str) -> str:
     value = normalize_cell(value).lower()
 
@@ -187,9 +234,13 @@ def build_task_generation_prompt(
     repetition_day: int,
     task_feedback_context: str = "Пока нет сохранённых жалоб на задачи.",
     dataset: dict[str, Any] | None = None,
+    difficulty_profile: str = "balanced",
+    topic_materials_context: str = "",
 ) -> str:
     known_blocks = ", ".join(str(block) for block in topic.get("known_blocks", []))
     dataset_context = format_dataset_context(dataset)
+    difficulty_context = format_difficulty_profile(difficulty_profile)
+    materials_context = format_topic_materials_context(topic_materials_context)
 
     return f"""
 Ты — эксперт по Python для анализа данных и опытный преподаватель.
@@ -263,6 +314,12 @@ def build_task_generation_prompt(
 Контекст датасета:
 {dataset_context}
 
+Режим сложности:
+{difficulty_context}
+
+Материалы по теме:
+{materials_context}
+
 Сгенерируй ровно 40 задач:
 - 10 задач на исправление ошибок;
 - 10 задач формата "что выведет код?";
@@ -281,7 +338,12 @@ def build_task_generation_prompt(
 - не давай подсказок в условиях;
 - не давай решений;
 - не добавляй комментарии-подсказки в код;
-- задачи должны быть уникальными;
+- задачи должны быть уникальными по данным, формулировке и требуемому действию;
+- не генерируй 20 задач одного шаблона “input → if/else → print”;
+- используй input() только если тема явно про ввод с клавиатуры; в остальных случаях чаще давай готовые переменные, списки, словари или параметры функции;
+- в задачах на написание кода смешивай форматы: написать функцию с return, дописать выражение, обработать список/словарь, посчитать метрику, проверить граничный случай;
+- как минимум половина write_code задач должна требовать вернуть значение через return, а не только печатать через print;
+- не требуй print там, где естественнее вернуть значение из функции;
 - где уместно, используй контекст реальных данных: продажи, маркетинг, HR, финансы, списки клиентов, файлы, простая аналитика;
 - формулировки должны быть понятными и короткими;
 - язык — русский;
@@ -409,6 +471,8 @@ def generate_tasks(
     repetition_day: int,
     task_feedback_context: str = "Пока нет сохранённых жалоб на задачи.",
     dataset: dict[str, Any] | None = None,
+    difficulty_profile: str = "balanced",
+    topic_materials_context: str = "",
 ) -> list[dict[str, Any]]:
     response_text = call_gemini_with_retry(
         build_task_generation_prompt(
@@ -416,6 +480,8 @@ def generate_tasks(
             repetition_day,
             task_feedback_context,
             dataset=dataset,
+            difficulty_profile=difficulty_profile,
+            topic_materials_context=topic_materials_context,
         ),
         models=TASK_GENERATION_MODELS,
     )
@@ -559,6 +625,76 @@ def generate_weak_spot_tasks(
     )
     return extract_json_from_gemini(response_text)
 
+
+
+def build_task_hint_prompt(
+    task: dict[str, Any],
+    topic: dict[str, Any],
+    user_answer: str = "",
+    hint_mode: str = "hint",
+) -> str:
+    mode = normalize_cell(hint_mode) or "hint"
+    code_part = task.get("code", "")
+
+    if mode == "consultation":
+        help_instruction = """
+Дай короткую консультацию по подходу к решению:
+- какие понятия из темы здесь нужны;
+- как разложить задачу на 2–4 шага;
+- на что обратить внимание;
+- не давай финальный готовый код, если пользователь не прислал почти готовое решение.
+"""
+    else:
+        help_instruction = """
+Дай одну полезную подсказку:
+- не раскрывай полное решение;
+- не пиши финальный код целиком;
+- подтолкни к следующему шагу.
+"""
+
+    return f"""
+Ты помогаешь студенту решить учебную задачу по Python.
+
+Текущая тема:
+{topic["stage"]}, блок {topic["block"]}: {topic["title"]}
+
+Тип задачи:
+{task.get("type")}
+
+Условие задачи:
+{task.get("task")}
+
+Код из условия, если есть:
+```python
+{code_part}
+```
+
+Текущий ответ пользователя, если он уже что-то написал:
+```python
+{user_answer}
+```
+
+{help_instruction}
+
+Пиши на русском, коротко и по делу.
+"""
+
+
+def get_task_hint(
+    task: dict[str, Any],
+    topic: dict[str, Any],
+    user_answer: str = "",
+    hint_mode: str = "hint",
+) -> str:
+    return call_gemini_with_retry(
+        build_task_hint_prompt(
+            task=task,
+            topic=topic,
+            user_answer=user_answer,
+            hint_mode=hint_mode,
+        ),
+        models=FEEDBACK_MODELS,
+    )
 
 
 def get_feedback_json(
