@@ -9,6 +9,7 @@ from sheets import (
     load_mistakes,
     now_iso,
     save_generated_tasks,
+    validate_generated_tasks,
 )
 from ui_common import load_session_into_state
 from ui_datasets import get_dataset_selector
@@ -136,6 +137,10 @@ def render_weak_spots_tab(topics: list[dict[str, Any]], today_value: date) -> No
                     difficulty=difficulty,
                     dataset=selected_dataset,
                 )
+                generated_tasks = validate_generated_tasks(
+                    generated_tasks,
+                    expected_total=task_count,
+                )
 
                 session_id = create_session(
                     selected_topic["id"],
@@ -148,6 +153,7 @@ def render_weak_spots_tab(topics: list[dict[str, Any]], today_value: date) -> No
                     selected_topic,
                     -1,
                     generated_tasks,
+                    expected_total=task_count,
                 )
 
                 session = {
