@@ -16,6 +16,7 @@ ANSWERS_SHEET_NAME = "answers"
 MISTAKES_SHEET_NAME = "mistakes"
 TASK_FEEDBACK_SHEET_NAME = "task_feedback"
 DATASETS_SHEET_NAME = "datasets"
+TOPIC_MATERIALS_SHEET_NAME = "topic_materials"
 
 CORRECT_STATUSES = {"correct", "answered"}
 ANSWERED_STATUSES = {"correct", "partially_correct", "incorrect", "answered"}
@@ -536,6 +537,98 @@ def get_task_feedback_context(topic_id: str, limit: int = 12) -> str:
     return "\n".join(lines)
 
 
+@st.cache_data(ttl=60)
+def load_topic_materials() -> list[dict[str, Any]]:
+    worksheet = get_or_create_worksheet(
+        TOPIC_MATERIALS_SHEET_NAME,
+        [
+            "material_id",
+            "topic_id",
+            "title",
+            "material_text",
+            "status",
+            "created_at",
+        ],
+    )
+
+    records = worksheet.get_all_records()
+    materials = []
+
+    for index, record in enumerate(records, start=2):
+        material_id = normalize_cell(record.get("material_id"))
+        topic_id = normalize_cell(record.get("topic_id"))
+
+        if not material_id and not topic_id:
+            continue
+
+        materials.append(
+            {
+                "row_number": index,
+                "material_id": material_id or f"material_row_{index}",
+                "topic_id": topic_id,
+                "title": normalize_cell(record.get("title")),
+                "material_text": normalize_cell(record.get("material_text")),
+                "status": normalize_cell(record.get("status")) or "active",
+                "created_at": normalize_cell(record.get("created_at")),
+            }
+        )
+
+    return materials
+
+
+def get_topic_materials_context(topic_id: str, extra_materials: str = "", limit: int = 5) -> str:
+    parts = []
+
+    try:
+        materials = [
+            item for item in load_topic_materials()
+            if item.get("topic_id") == topic_id and item.get("status") == "active"
+        ]
+    except Exception:
+        materials = []
+
+    for item in materials[-limit:]:
+        title = item.get("title") or "Материал без названия"
+        text = item.get("material_text") or ""
+        if text:
+            parts.append(f"## {title}\n{text}")
+
+    extra_materials = normalize_cell(extra_materials)
+    if extra_materials:
+        parts.append(f"## Материал, добавленный перед генерацией\n{extra_materials}")
+
+    return "\n\n".join(parts)
+
+
+def save_topic_material(topic_id: str, title: str, material_text: str) -> None:
+    if not normalize_cell(material_text):
+        return
+
+    worksheet = get_or_create_worksheet(
+        TOPIC_MATERIALS_SHEET_NAME,
+        [
+            "material_id",
+            "topic_id",
+            "title",
+            "material_text",
+            "status",
+            "created_at",
+        ],
+    )
+
+    worksheet.append_row(
+        [
+            f"material_{uuid.uuid4().hex[:12]}",
+            topic_id,
+            normalize_cell(title) or "Материал по теме",
+            material_text,
+            "active",
+            now_iso(),
+        ],
+        value_input_option="USER_ENTERED",
+    )
+
+    st.cache_data.clear()
 
 
 @st.cache_data(ttl=60)
