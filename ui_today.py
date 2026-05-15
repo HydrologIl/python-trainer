@@ -3,7 +3,7 @@ from typing import Any
 
 import streamlit as st
 
-from gemini_service import generate_tasks, get_feedback_json
+from gemini_service import generate_tasks, get_feedback_json, get_task_hint
 from scheduler import get_due_repetitions, get_next_repetition
 from sheets import (
     create_session,
@@ -24,6 +24,9 @@ from sheets import (
     update_session_status,
     update_task_status,
     validate_generated_tasks,
+    get_topic_materials_context,
+    load_topic_materials,
+    save_topic_material,
 )
 from ui_common import (
     reset_session,
@@ -133,15 +136,81 @@ def render_today_tab(topics: list[dict[str, Any]], today_value: date) -> None:
             key=f"today_dataset_{selected_topic['id']}_{selected_repetition_day}_{scheduled_date}",
         )
 
+        difficulty_profile = st.selectbox(
+            "Режим генерации задач",
+            options=["balanced", "harder", "interview"],
+            format_func=lambda value: {
+                "balanced": "Сбалансированный",
+                "harder": "Сложнее обычного",
+                "interview": "Ближе к тестам для аналитика",
+            }.get(value, value),
+            help=(
+                "Сложные режимы всё равно должны оставаться в рамках текущей и уже изученных тем, "
+                "но задачи будут менее однотипными."
+            ),
+            key=f"difficulty_profile_{selected_topic['id']}_{selected_repetition_day}_{scheduled_date}",
+        )
+
+        try:
+            saved_materials = [
+                item for item in load_topic_materials()
+                if item.get("topic_id") == selected_topic["id"] and item.get("status") == "active"
+            ]
+        except Exception:
+            saved_materials = []
+
+        with st.expander(f"Материалы по теме для генерации задач ({len(saved_materials)} сохранено)"):
+            if saved_materials:
+                st.caption("Эти материалы будут учитываться при генерации задач.")
+                for item in saved_materials[-5:]:
+                    st.write(f"- {item.get('title') or 'Материал без названия'}")
+            else:
+                st.caption("Сохранённых материалов по этой теме пока нет.")
+
+            material_title = st.text_input(
+                "Название материала",
+                value="Конспект / диалог по теме",
+                key=f"material_title_{selected_topic['id']}_{selected_repetition_day}_{scheduled_date}",
+            )
+            extra_materials = st.text_area(
+                "Дополнительный материал для этой генерации",
+                placeholder=(
+                    "Можно вставить сюда конспект, кусок диалога с ИИ, типы задач, объяснения "
+                    "или примеры, по которым ты учился."
+                ),
+                height=180,
+                key=f"extra_materials_{selected_topic['id']}_{selected_repetition_day}_{scheduled_date}",
+            )
+            save_material = st.checkbox(
+                "Сохранить этот материал для будущих генераций по теме",
+                value=False,
+                key=f"save_material_{selected_topic['id']}_{selected_repetition_day}_{scheduled_date}",
+            )
+
         if st.button("Начать сессию и сгенерировать задачи"):
             with st.spinner("Gemini генерирует 40 задач и сохраняет их в Google Sheets..."):
                 try:
                     task_feedback_context = get_task_feedback_context(selected_topic["id"])
+
+                    if save_material and extra_materials.strip():
+                        save_topic_material(
+                            selected_topic["id"],
+                            material_title,
+                            extra_materials,
+                        )
+
+                    topic_materials_context = get_topic_materials_context(
+                        selected_topic["id"],
+                        extra_materials=extra_materials,
+                    )
+
                     generated_tasks = generate_tasks(
                         selected_topic,
                         selected_repetition_day,
                         task_feedback_context=task_feedback_context,
                         dataset=selected_dataset,
+                        difficulty_profile=difficulty_profile,
+                        topic_materials_context=topic_materials_context,
                     )
                     generated_tasks = validate_generated_tasks(generated_tasks, expected_total=40)
 
@@ -224,7 +293,7 @@ def render_active_session(
                 "Вернись к первой задаче, которая требует повтора."
             )
 
-        col_restart, col_retry = st.columns(2)
+        col_restart, col_retry, col_exit = st.columns(3)
 
         with col_restart:
             if st.button("Начать заново с первой задачи"):
@@ -243,6 +312,11 @@ def render_active_session(
                         st.session_state["last_verdict"] = ""
                         st.session_state["user_answer"] = ""
                         st.rerun()
+
+        with col_exit:
+            if st.button("Закрыть сессию и вернуться к списку"):
+                reset_session()
+                st.rerun()
 
         st.stop()
 
@@ -282,7 +356,7 @@ def render_active_session(
         disabled=current_task.get("status") in ["answered", "correct", "bad_task"],
     )
 
-    col_prev, col_check, col_skip, col_next = st.columns(4)
+    col_prev, col_check, col_hint, col_skip, col_next = st.columns(5)
 
     with col_prev:
         if st.button("← Назад", disabled=current_task_index == 0):
@@ -301,6 +375,27 @@ def render_active_session(
                 st.warning("Сначала напиши ответ.")
             else:
                 handle_check_answer(current_task, selected_topic, user_answer)
+
+    with col_hint:
+        hint_mode = st.selectbox(
+            "Помощь",
+            options=["hint", "consultation"],
+            format_func=lambda value: "Подсказка" if value == "hint" else "Консультация",
+            label_visibility="collapsed",
+            key=f"hint_mode_{current_task['task_id']}",
+        )
+        if st.button("Помощь", key=f"hint_button_{current_task['task_id']}"):
+            with st.spinner("Gemini готовит подсказку..."):
+                try:
+                    st.session_state[f"hint_text_{current_task['task_id']}"] = get_task_hint(
+                        current_task,
+                        selected_topic,
+                        user_answer=user_answer,
+                        hint_mode=hint_mode,
+                    )
+                except Exception as e:
+                    st.error("Не удалось получить подсказку.")
+                    st.code(str(e))
 
     with col_skip:
         if st.button(
@@ -330,6 +425,11 @@ def render_active_session(
             st.session_state["last_verdict"] = ""
             st.session_state["user_answer"] = ""
             st.rerun()
+
+    hint_text = st.session_state.get(f"hint_text_{current_task['task_id']}")
+    if hint_text:
+        with st.expander("Подсказка / консультация", expanded=True):
+            st.markdown(hint_text)
 
     render_task_complaint(current_task, current_task_index)
 
