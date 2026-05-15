@@ -444,6 +444,12 @@ def handle_check_answer(
     selected_topic: dict[str, Any],
     user_answer: str,
 ) -> None:
+    # Дополнительная защита состояния: после проверки Streamlit делает rerun.
+    # Явно сохраняем текущую сессию, чтобы она не исчезала с экрана,
+    # особенно если задача открыта из старой сессии или с телефона.
+    st.session_state["current_session_id"] = current_task["session_id"]
+    st.session_state.setdefault("active_session_source", "sessions")
+
     with st.spinner("Gemini проверяет ответ и сохраняет фидбек..."):
         try:
             feedback_data = get_feedback_json(
