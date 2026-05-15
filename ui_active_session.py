@@ -57,3 +57,9 @@ def render_active_session_top(topics: list[dict]) -> None:
 
     render_active_session(current_topic, current_session)
     st.markdown("---")
+
+    # Важно: Streamlit рендерит код всех вкладок, даже если пользователь смотрит не на них.
+    # Если ниже продолжить выполнение, render_today_tab() может сбросить session_state
+    # из-за выбранной в selectbox другой темы/даты. Поэтому, пока открыта активная
+    # сессия, останавливаем дальнейший рендер страницы.
+    st.stop()
