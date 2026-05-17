@@ -6,24 +6,6 @@ from typing import Any
 import streamlit as st
 from google import genai
 
-from curriculum import (
-    GENERAL_CURRICULUM,
-    STAGE_0_CURRICULUM,
-    STAGE_0_KNOWLEDGE_MATRIX,
-    STAGE_0_FINAL_PROJECT_ORDERS,
-    STAGE_1_CURRICULUM,
-    STAGE_1_KNOWLEDGE_MATRIX,
-    STAGE_1_FINAL_PROJECT_EDA,
-    STAGE_2_CURRICULUM,
-    STAGE_2_KNOWLEDGE_MATRIX,
-    STAGE_2_FINAL_PROJECT_LOYALTY,
-    STAGE_3_CURRICULUM,
-    STAGE_3_KNOWLEDGE_MATRIX,
-    STAGE_3_FINAL_PROJECT_ECOMMERCE_REPORT,
-    STAGE_4_CURRICULUM,
-    STAGE_4_KNOWLEDGE_MATRIX,
-    STAGE_4_FINAL_PROJECT_DQ_ETL_ML,
-)
 
 
 # Генерация задач требует более сильной модели.
@@ -51,6 +33,81 @@ def normalize_cell(value: Any) -> str:
     return str(value).strip()
 
 
+def truncate_text(text: str, max_chars: int = 8000) -> str:
+    text = normalize_cell(text)
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n...[текст обрезан по лимиту]"
+
+
+def format_list_field(value: Any) -> str:
+    text = normalize_cell(value)
+    return text if text else "Не указано."
+
+
+def format_topic_contract(topic: dict[str, Any]) -> str:
+    """Build the curriculum contract from the new Market Track topic fields.
+
+    The old app mainly used stage/block/title/description. The new Google Sheet
+    has explicit boundaries: required_core, frequent_constructs, common_mistakes,
+    do_not_touch and readiness_criteria. These fields should govern generation.
+    """
+    stage_label = topic.get("stage_title") or topic.get("stage") or "Не указан"
+    stage_id = topic.get("stage_id") or ""
+    stage_block_number = topic.get("stage_block_number") or topic.get("block") or ""
+    global_order = topic.get("global_order") or topic.get("block") or ""
+
+    return f"""
+Учебный контракт текущего блока:
+- curriculum_version: {topic.get("curriculum_version", "legacy")}
+- stage_id: {stage_id}
+- stage: {stage_label}
+- stage_block_number: {stage_block_number}
+- global_order: {global_order}
+- topic_id: {topic.get("id", "")}
+- title: {topic.get("title", "")}
+- priority: {topic.get("priority", "")}
+- recommended_duration: {topic.get("recommended_duration", "")}
+
+Цель блока:
+{format_list_field(topic.get("goal") or topic.get("description"))}
+
+Обязательное ядро. Это разрешённые и ожидаемые инструменты для задач текущего блока:
+{format_list_field(topic.get("required_core"))}
+
+Частотные конструкции. На этих паттернах удобно строить задачи:
+{format_list_field(topic.get("frequent_constructs"))}
+
+Типовые ошибки. Желательно специально тренировать их распознавание и исправление:
+{format_list_field(topic.get("common_mistakes"))}
+
+Пока не трогать. Эти инструменты и темы запрещены для генерации задач по этому блоку:
+{format_list_field(topic.get("do_not_touch"))}
+
+Критерий готовности:
+{format_list_field(topic.get("readiness_criteria"))}
+"""
+
+
+def format_known_blocks_context(topic: dict[str, Any]) -> str:
+    known_blocks = topic.get("known_blocks", [])
+    if not known_blocks:
+        return "В Google Sheets нет явного списка пройденных блоков. Ориентируйся только на текущий учебный контракт."
+
+    return ", ".join(str(block) for block in known_blocks)
+
+
+def format_generation_guardrails(topic: dict[str, Any]) -> str:
+    return f"""
+Главное правило уровня:
+- Генерируй задачи в зоне ближайшего развития: чуть сложнее примеров из блока, но без новых непройденных инструментов.
+- Усложняй логику только внутри обязательного ядра текущего и уже пройденных блоков.
+- Раздел «Пока не трогать» имеет приоритет выше режима сложности, датасета и реалистичности бизнес-кейса.
+- Если реалистичный кейс требует запрещённого инструмента, упрости кейс или замени инструмент.
+- Не используй pandas до блоков pandas, SQL до блоков SQL, API до блоков API, try/except до блоков обработки ошибок, если они указаны как запрещённые или ещё не являются частью текущего блока.
+- Не добавляй list/dict/set/циклы/файлы/классы/regex/type hints только ради разнообразия, если их нет в обязательном ядре текущего или уже пройденных блоков.
+- Для M0 ранних блоков особенно строго соблюдай границы: функции и условия должны тренироваться через параметры, return и простые значения, а не через будущие коллекции, если коллекции ещё не пройдены.
+"""
 
 
 def format_dataset_context(dataset: dict[str, Any] | None) -> str:
@@ -237,75 +294,30 @@ def build_task_generation_prompt(
     difficulty_profile: str = "balanced",
     topic_materials_context: str = "",
 ) -> str:
-    known_blocks = ", ".join(str(block) for block in topic.get("known_blocks", []))
+    topic_contract = format_topic_contract(topic)
+    known_blocks = format_known_blocks_context(topic)
     dataset_context = format_dataset_context(dataset)
     difficulty_context = format_difficulty_profile(difficulty_profile)
     materials_context = format_topic_materials_context(topic_materials_context)
+    guardrails = format_generation_guardrails(topic)
 
     return f"""
 Ты — эксперт по Python для анализа данных и опытный преподаватель.
 
 Твоя задача — сгенерировать учебные задачи для повторения по кривой Эббингауза.
 
-Контекст верхнеуровневой программы курса:
-{GENERAL_CURRICULUM}
+Теперь источник правды — не старый curriculum.py, а строка текущей темы из Google Sheets.
+Используй учебный контракт ниже как главный ограничитель содержания, сложности и допустимых инструментов.
 
-Детальная программа этапа 0:
-{STAGE_0_CURRICULUM}
+{topic_contract}
 
-Матрица знаний этапа 0:
-{STAGE_0_KNOWLEDGE_MATRIX}
-
-Итоговый проект этапа 0:
-{STAGE_0_FINAL_PROJECT_ORDERS}
-
-Детальная программа этапа 1:
-{STAGE_1_CURRICULUM}
-
-Матрица знаний этапа 1:
-{STAGE_1_KNOWLEDGE_MATRIX}
-
-Итоговый проект этапа 1:
-{STAGE_1_FINAL_PROJECT_EDA}
-
-Детальная программа этапа 2:
-{STAGE_2_CURRICULUM}
-
-Матрица знаний этапа 2:
-{STAGE_2_KNOWLEDGE_MATRIX}
-
-Итоговый проект этапа 2:
-{STAGE_2_FINAL_PROJECT_LOYALTY}
-
-Детальная программа этапа 3:
-{STAGE_3_CURRICULUM}
-
-Матрица знаний этапа 3:
-{STAGE_3_KNOWLEDGE_MATRIX}
-
-Итоговый проект этапа 3:
-{STAGE_3_FINAL_PROJECT_ECOMMERCE_REPORT}
-
-Детальная программа этапа 4:
-{STAGE_4_CURRICULUM}
-
-Матрица знаний этапа 4:
-{STAGE_4_KNOWLEDGE_MATRIX}
-
-Итоговый проект этапа 4:
-{STAGE_4_FINAL_PROJECT_DQ_ETL_ML}
-
-Текущая тема:
-{topic["stage"]}, блок {topic["block"]}: {topic["title"]}
-
-Краткое описание темы:
-{topic["description"]}
-
-Студент уже прошёл блоки:
+Студент уже прошёл блоки по глобальной нумерации:
 {known_blocks}
 
 День повторения:
 {repetition_day}
+
+{guardrails}
 
 Журнал жалоб пользователя на ранее сгенерированные задачи. Это дефекты генерации, а не ошибки пользователя.
 Используй этот журнал как анти-примеры и не повторяй такие проблемы:
@@ -325,26 +337,22 @@ def build_task_generation_prompt(
 - 10 задач формата "что выведет код?";
 - 20 задач на написание кода.
 
-Требования:
+Требования к содержанию:
 - задачи должны проверять именно текущую тему;
 - для решения должны требоваться только знания из обязательного ядра текущего и уже пройденных блоков;
-- запрещено использовать конструкции из разделов “Пока не трогать” матрицы знаний;
-- если текущая тема относится к Этапу 0, используй матрицу этапа 0;
-- если текущая тема относится к Этапу 1, используй матрицу этапа 1;
-- если текущая тема относится к Этапу 2, используй матрицу этапа 2;
-- если текущая тема относится к Этапу 3, используй матрицу этапа 3;
-- если текущая тема относится к Этапу 4, используй матрицу этапа 4;
+- запрещено использовать конструкции из поля «Пока не трогать»;
+- если текущий блок ранний, не забегай вперёд ради реалистичности;
 - если тема не является итоговым проектом, не превращай обычную тренировку в большой проект;
 - не давай подсказок в условиях;
 - не давай решений;
 - не добавляй комментарии-подсказки в код;
 - задачи должны быть уникальными по данным, формулировке и требуемому действию;
 - не генерируй 20 задач одного шаблона “input → if/else → print”;
-- используй input() только если тема явно про ввод с клавиатуры; в остальных случаях чаще давай готовые переменные, списки, словари или параметры функции;
-- в задачах на написание кода смешивай форматы: написать функцию с return, дописать выражение, обработать список/словарь, посчитать метрику, проверить граничный случай;
-- как минимум половина write_code задач должна требовать вернуть значение через return, а не только печатать через print;
+- используй input() только если тема явно про ввод с клавиатуры; в остальных случаях чаще давай готовые переменные или параметры функции;
 - не требуй print там, где естественнее вернуть значение из функции;
-- где уместно, используй контекст реальных данных: продажи, маркетинг, HR, финансы, списки клиентов, файлы, простая аналитика;
+- если return входит в обязательное ядро текущего или предыдущих блоков, чаще проси вернуть значение через return;
+- если списки/словари/pandas/SQL/API не входят в обязательное ядро текущего или предыдущих блоков, не используй их;
+- где уместно и не нарушает границы темы, используй контекст реальных данных: продажи, маркетинг, HR, финансы, клиенты;
 - формулировки должны быть понятными и короткими;
 - язык — русский;
 - для задач типа "debug" в коде ОБЯЗАНА быть реальная ошибка;
@@ -387,12 +395,12 @@ def build_feedback_prompt(
     topic: dict[str, Any],
 ) -> str:
     code_part = task.get("code", "")
+    topic_contract = format_topic_contract(topic)
 
     return f"""
 Ты проверяешь решение учебной задачи по Python.
 
-Текущая тема:
-{topic["stage"]}, блок {topic["block"]}: {topic["title"]}
+{topic_contract}
 
 Тип задачи:
 {task.get("type")}
@@ -416,6 +424,8 @@ def build_feedback_prompt(
 - пиши на русском;
 - будь конкретным;
 - не растекайся;
+- проверяй решение в рамках учебного контракта текущего блока;
+- если пользователь решил задачу более продвинутым способом, не ругай его автоматически, но отметь, если способ выходит за рамки текущего блока;
 - если решение почти верное, не переписывай весь код, дай точечную правку;
 - если решение неверное, объясни ошибку и дай маленькую подсказку;
 - если это задача "что выведет код?", проверь не только результат, но и ход рассуждения;
@@ -497,65 +507,23 @@ def build_weak_spot_generation_prompt(
     difficulty: str,
     dataset: dict[str, Any] | None = None,
 ) -> str:
-    known_blocks = ", ".join(str(block) for block in topic.get("known_blocks", []))
+    known_blocks = format_known_blocks_context(topic)
     examples_text = "\n".join(f"- {example}" for example in mistake_examples) or "Примеров нет."
     dataset_context = format_dataset_context(dataset)
+    topic_contract = format_topic_contract(topic)
+    guardrails = format_generation_guardrails(topic)
 
     return f"""
 Ты — эксперт по Python для анализа данных и опытный преподаватель.
 
 Нужно сгенерировать короткую тренировку на слабое место студента.
 
-Текущая тема:
-{topic["stage"]}, блок {topic["block"]}: {topic["title"]}
+{topic_contract}
 
-Описание темы:
-{topic["description"]}
-
-Матрица знаний этапа 0:
-{STAGE_0_KNOWLEDGE_MATRIX}
-
-Итоговый проект этапа 0:
-{STAGE_0_FINAL_PROJECT_ORDERS}
-
-Детальная программа этапа 1:
-{STAGE_1_CURRICULUM}
-
-Матрица знаний этапа 1:
-{STAGE_1_KNOWLEDGE_MATRIX}
-
-Итоговый проект этапа 1:
-{STAGE_1_FINAL_PROJECT_EDA}
-
-Детальная программа этапа 2:
-{STAGE_2_CURRICULUM}
-
-Матрица знаний этапа 2:
-{STAGE_2_KNOWLEDGE_MATRIX}
-
-Итоговый проект этапа 2:
-{STAGE_2_FINAL_PROJECT_LOYALTY}
-
-Детальная программа этапа 3:
-{STAGE_3_CURRICULUM}
-
-Матрица знаний этапа 3:
-{STAGE_3_KNOWLEDGE_MATRIX}
-
-Итоговый проект этапа 3:
-{STAGE_3_FINAL_PROJECT_ECOMMERCE_REPORT}
-
-Детальная программа этапа 4:
-{STAGE_4_CURRICULUM}
-
-Матрица знаний этапа 4:
-{STAGE_4_KNOWLEDGE_MATRIX}
-
-Итоговый проект этапа 4:
-{STAGE_4_FINAL_PROJECT_DQ_ETL_ML}
-
-Студент уже прошёл блоки:
+Студент уже прошёл блоки по глобальной нумерации:
 {known_blocks}
+
+{guardrails}
 
 Слабое место:
 {mistake_type}
@@ -572,12 +540,7 @@ def build_weak_spot_generation_prompt(
 - задачи должны тренировать именно слабое место;
 - задачи должны быть в рамках текущей темы;
 - для решения должны требоваться только знания из обязательного ядра текущего и уже пройденных блоков;
-- запрещено использовать конструкции из разделов “Пока не трогать” матрицы знаний;
-- если текущая тема относится к Этапу 0, используй матрицу этапа 0;
-- если текущая тема относится к Этапу 1, используй матрицу этапа 1;
-- если текущая тема относится к Этапу 2, используй матрицу этапа 2;
-- если текущая тема относится к Этапу 3, используй матрицу этапа 3;
-- если текущая тема относится к Этапу 4, используй матрицу этапа 4;
+- запрещено использовать конструкции из поля «Пока не трогать»;
 - не давай решений;
 - не давай подсказок в условии;
 - язык русский;
@@ -635,6 +598,7 @@ def build_task_hint_prompt(
 ) -> str:
     mode = normalize_cell(hint_mode) or "hint"
     code_part = task.get("code", "")
+    topic_contract = format_topic_contract(topic)
 
     if mode == "consultation":
         help_instruction = """
@@ -655,8 +619,7 @@ def build_task_hint_prompt(
     return f"""
 Ты помогаешь студенту решить учебную задачу по Python.
 
-Текущая тема:
-{topic["stage"]}, блок {topic["block"]}: {topic["title"]}
+{topic_contract}
 
 Тип задачи:
 {task.get("type")}
@@ -676,7 +639,7 @@ def build_task_hint_prompt(
 
 {help_instruction}
 
-Пиши на русском, коротко и по делу.
+Пиши на русском, коротко и по делу. Не используй инструменты из поля «Пока не трогать», если они не нужны для объяснения запрета.
 """
 
 
