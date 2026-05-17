@@ -139,6 +139,34 @@ def parse_known_blocks(value: Any) -> list[int]:
     return result
 
 
+def get_record_text(record: dict[str, Any], key: str, default: str = "") -> str:
+    return normalize_cell(record.get(key)) or default
+
+
+def get_record_int(record: dict[str, Any], key: str, default: int = 0) -> int:
+    value = record.get(key)
+    if value is None or value == "":
+        return default
+
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def get_column_index(headers: list[str], column_name: str, fallback_index: int) -> int:
+    """Return 1-based Google Sheets column index.
+
+    The app originally updated topics by hard-coded column numbers.
+    The new curriculum adds many columns, so this helper keeps updates safe
+    if columns are reordered later.
+    """
+    try:
+        return headers.index(column_name) + 1
+    except ValueError:
+        return fallback_index
+
+
 @st.cache_resource(ttl=300)
 def get_spreadsheet() -> gspread.Spreadsheet:
     sheet_id = st.secrets.get("GOOGLE_SHEET_ID")
@@ -201,17 +229,53 @@ def load_topics() -> list[dict[str, Any]]:
         if not topic_id:
             continue
 
+        stage = get_record_text(record, "stage")
+        block = get_record_int(record, "block")
+        title = get_record_text(record, "title")
+        description = get_record_text(record, "description")
+
+        # New Market Track fields. They are optional so old sheets keep working.
+        curriculum_version = get_record_text(record, "curriculum_version", "legacy")
+        stage_id = get_record_text(record, "stage_id")
+        stage_title = get_record_text(record, "stage_title")
+        stage_block_number = get_record_int(record, "stage_block_number", block)
+        global_order = get_record_int(record, "global_order", block)
+        goal = get_record_text(record, "goal")
+        required_core = get_record_text(record, "required_core")
+        frequent_constructs = get_record_text(record, "frequent_constructs")
+        common_mistakes = get_record_text(record, "common_mistakes")
+        do_not_touch = get_record_text(record, "do_not_touch")
+        readiness_criteria = get_record_text(record, "readiness_criteria")
+        priority = get_record_text(record, "priority", "core")
+        recommended_duration = get_record_text(record, "recommended_duration")
+        source_document = get_record_text(record, "source_document")
+
+        # Keep backwards-compatible keys first; add richer curriculum metadata after them.
         topics.append(
             {
                 "row_number": index,
                 "id": topic_id,
-                "stage": normalize_cell(record.get("stage")),
-                "block": int(record.get("block") or 0),
-                "title": normalize_cell(record.get("title")),
-                "description": normalize_cell(record.get("description")),
-                "learned_date": normalize_cell(record.get("learned_date")),
+                "stage": stage,
+                "block": block,
+                "title": title,
+                "description": description,
+                "learned_date": get_record_text(record, "learned_date"),
                 "known_blocks": parse_known_blocks(record.get("known_blocks")),
-                "status": normalize_cell(record.get("status")) or "planned",
+                "status": get_record_text(record, "status", "planned"),
+                "curriculum_version": curriculum_version,
+                "stage_id": stage_id,
+                "stage_title": stage_title,
+                "stage_block_number": stage_block_number,
+                "global_order": global_order,
+                "goal": goal,
+                "required_core": required_core,
+                "frequent_constructs": frequent_constructs,
+                "common_mistakes": common_mistakes,
+                "do_not_touch": do_not_touch,
+                "readiness_criteria": readiness_criteria,
+                "priority": priority,
+                "recommended_duration": recommended_duration,
+                "source_document": source_document,
             }
         )
 
@@ -222,8 +286,12 @@ def update_topic(topic: dict[str, Any], learned_date: str, status: str) -> None:
     worksheet = get_worksheet(TOPICS_SHEET_NAME)
     row_number = topic["row_number"]
 
-    worksheet.update_cell(row_number, 6, learned_date)
-    worksheet.update_cell(row_number, 8, status)
+    headers = worksheet.row_values(1)
+    learned_date_col = get_column_index(headers, "learned_date", fallback_index=6)
+    status_col = get_column_index(headers, "status", fallback_index=8)
+
+    worksheet.update_cell(row_number, learned_date_col, learned_date)
+    worksheet.update_cell(row_number, status_col, status)
 
     st.cache_data.clear()
     st.cache_resource.clear()
