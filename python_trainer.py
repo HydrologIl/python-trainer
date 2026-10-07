@@ -1,58 +1,17 @@
-import streamlit as st
-
-from sheets import load_topics
-from ui import (
-    reset_session,
-    render_sidebar,
-    render_today_tab,
-    render_plan_tab,
-    render_sessions_tab,
-    render_progress_tab,
-    render_weak_spots_tab,
-    render_active_session_top,
-    render_datasets_tab,
-)
-
-
-st.set_page_config(page_title="Python Trainer", page_icon="🐍", layout="centered")
-
-st.title("Python Trainer")
-st.write("Google Sheets как база + удобная сессия + прогресс и ошибки.")
-
-today_value = render_sidebar()
+import os
 
 try:
-    topics = load_topics()
-except Exception as e:
-    st.error("Не удалось прочитать Google Sheet.")
-    st.write(
-        "Если видишь 429 quota exceeded — это лимит чтения Google Sheets. "
-        "Подожди 1–2 минуты и нажми «Перечитать Google Sheet». "
-        "Чтение кэшируется на 60 секунд."
-    )
-    st.code(str(e))
-    st.stop()
+    import streamlit as st
 
-render_active_session_top(topics)
+    app_mode = str(st.secrets.get("APP_MODE", os.getenv("APP_MODE", "legacy"))).lower()
+except Exception:
+    app_mode = os.getenv("APP_MODE", "legacy").lower()
 
-tab_today, tab_plan, tab_sessions, tab_progress, tab_weak_spots, tab_datasets = st.tabs(
-    ["Сегодня", "Учебный план", "Сессии", "Прогресс", "Слабые места", "Датасеты"]
-)
+if app_mode == "universal":
+    from learning_app.streamlit_app import run_universal_app
 
-with tab_plan:
-    render_plan_tab(topics, today_value)
+    run_universal_app()
+else:
+    from legacy_app import run_legacy_app
 
-with tab_sessions:
-    render_sessions_tab(topics)
-
-with tab_progress:
-    render_progress_tab(topics, today_value)
-
-with tab_weak_spots:
-    render_weak_spots_tab(topics, today_value)
-
-with tab_datasets:
-    render_datasets_tab()
-
-with tab_today:
-    render_today_tab(topics, today_value)
+    run_legacy_app()

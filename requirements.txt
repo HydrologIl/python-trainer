@@ -1,4 +1,9 @@
-streamlit
-google-genai
-gspread
-google-auth
+streamlit>=1.45,<2
+pandas>=2.2,<3
+pydantic>=2.7,<3
+SQLAlchemy>=2.0,<3
+psycopg[binary]>=3.2,<4
+openai>=2,<3
+google-genai>=1,<2
+gspread>=6,<7
+google-auth>=2,<3

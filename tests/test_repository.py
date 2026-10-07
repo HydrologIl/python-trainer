@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+import unittest
+from datetime import date
+
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
+
+from learning_app.domain import KnowledgeItemDraft, KnowledgeKind, TaskDraft, TaskFormat
+from learning_app.repository import LearningRepository
+
+
+class RepositoryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        engine = create_engine(
+            "sqlite://",
+            future=True,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        self.repository = LearningRepository(engine=engine)
+        self.repository.create_schema()
+        self.course = self.repository.create_course("Python")
+        self.module = self.repository.add_module(self.course.id, "Функции")
+
+    def test_mark_studied_creates_five_idempotent_assignments(self) -> None:
+        self.repository.mark_module_studied(self.module.id, date(2026, 10, 1))
+        self.repository.mark_module_studied(self.module.id, date(2026, 10, 1))
+        due = self.repository.list_due_assignments(date(2026, 11, 1))
+        self.assertEqual(len(due), 5)
+        self.assertTrue(all(item.task_count == 40 for item in due))
+
+    def test_changing_learned_date_replaces_only_pending_regular_schedule(self) -> None:
+        self.repository.mark_module_studied(self.module.id, date(2026, 10, 1))
+        self.repository.mark_module_studied(self.module.id, date(2026, 10, 10))
+
+        due = self.repository.list_due_assignments(date(2026, 11, 15))
+        self.assertEqual(len(due), 5)
+        self.assertEqual(due[0].scheduled_date, date(2026, 10, 11))
+        self.assertEqual(due[-1].scheduled_date, date(2026, 11, 9))
+
+    def test_editing_material_and_reanalysis_deactivates_stale_knowledge(self) -> None:
+        material = self.repository.add_material(
+            self.module.id,
+            "Черновик",
+            "Старый текст",
+        )
+        self.repository.upsert_knowledge_items(
+            self.module.id,
+            [
+                KnowledgeItemDraft(
+                    client_id="old_fact",
+                    kind=KnowledgeKind.THEORY,
+                    title="Старый факт",
+                    description="Описание",
+                )
+            ],
+        )
+
+        self.repository.update_material(material.id, "Исправленный", "Новый текст")
+        self.repository.upsert_knowledge_items(
+            self.module.id,
+            [
+                KnowledgeItemDraft(
+                    client_id="new_fact",
+                    kind=KnowledgeKind.THEORY,
+                    title="Новый факт",
+                    description="Описание",
+                )
+            ],
+        )
+
+        saved_material = self.repository.list_materials(self.module.id)[0]
+        active_items = self.repository.list_knowledge_items(self.module.id)
+        self.assertEqual(saved_material.title, "Исправленный")
+        self.assertEqual(saved_material.content, "Новый текст")
+        self.assertEqual([item.client_key for item in active_items], ["new_fact"])
+
+    def test_session_and_tasks_are_atomic_and_idempotent(self) -> None:
+        mapping = self.repository.upsert_knowledge_items(
+            self.module.id,
+            [
+                KnowledgeItemDraft(
+                    client_id="return",
+                    kind=KnowledgeKind.SKILL,
+                    title="return",
+                    description="Возврат значения",
+                )
+            ],
+        )
+        self.repository.mark_module_studied(self.module.id, date(2026, 10, 1))
+        assignment = self.repository.list_due_assignments(date(2026, 10, 2))[0]
+        assignment.task_count = 1
+        with self.repository.transaction() as session:
+            session.merge(assignment)
+
+        tasks = [
+            TaskDraft(
+                format=TaskFormat.WRITE_CODE,
+                difficulty=2,
+                prompt="Напишите функцию.",
+                knowledge_client_ids=["return"],
+            )
+        ]
+        first = self.repository.create_session_with_tasks(
+            assignment.id, tasks, mapping, provider="fake", model="fake-1"
+        )
+        second = self.repository.create_session_with_tasks(
+            assignment.id, tasks, mapping, provider="fake", model="fake-1"
+        )
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(len(self.repository.list_tasks(first.id)), 1)
+
+    def test_skip_does_not_complete_session(self) -> None:
+        mapping = self.repository.upsert_knowledge_items(
+            self.module.id,
+            [
+                KnowledgeItemDraft(
+                    client_id="k1",
+                    kind=KnowledgeKind.THEORY,
+                    title="Факт",
+                    description="Описание",
+                )
+            ],
+        )
+        self.repository.mark_module_studied(self.module.id, date(2026, 10, 1))
+        assignment = self.repository.list_due_assignments(date(2026, 10, 2))[0]
+        assignment.task_count = 1
+        with self.repository.transaction() as session:
+            session.merge(assignment)
+        task = TaskDraft(
+            format=TaskFormat.TRUE_FALSE,
+            difficulty=1,
+            prompt="Верно?",
+            correct_answer=True,
+            knowledge_client_ids=["k1"],
+        )
+        review = self.repository.create_session_with_tasks(
+            assignment.id, [task], mapping, provider="fake", model="fake"
+        )
+        stored = self.repository.list_tasks(review.id)[0]
+        self.repository.set_task_status(stored.id, "skipped")
+        self.assertFalse(self.repository.complete_session_if_ready(review.id))
+        self.repository.set_task_status(stored.id, "abandoned")
+        self.assertTrue(self.repository.complete_session_if_ready(review.id))
+
+
+if __name__ == "__main__":
+    unittest.main()
