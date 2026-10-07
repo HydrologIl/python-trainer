@@ -39,6 +39,7 @@ class MigrationReport:
     tasks: int = 0
     answers: int = 0
     materials: int = 0
+    restored_topics: list[str] = field(default_factory=list)
     unresolved_references: list[str] = field(default_factory=list)
     dry_run: bool = True
 
@@ -107,27 +108,67 @@ def _module_scope(topic: dict[str, Any]) -> str:
     return "\n\n".join(f"{label}:\n{_text(value)}" for label, value in fields if _text(value))
 
 
+def _restored_topic_ids(snapshot: LegacySnapshot) -> list[str]:
+    source_topic_ids = {
+        _text(row.get("topic_id"))
+        for row in snapshot.topics
+        if _text(row.get("topic_id"))
+    }
+    referenced_topic_ids = {
+        _text(row.get("topic_id"))
+        for row in snapshot.sessions
+        if _text(row.get("topic_id"))
+    }
+    return sorted(referenced_topic_ids - source_topic_ids)
+
+
+def _topic_rows_with_restored_history(snapshot: LegacySnapshot) -> list[dict[str, Any]]:
+    rows = [row for row in snapshot.topics if _text(row.get("topic_id"))]
+    last_order = max(
+        (_integer(row.get("global_order"), 10_000) for row in rows),
+        default=0,
+    )
+    for offset, legacy_id in enumerate(_restored_topic_ids(snapshot), start=1):
+        rows.append(
+            {
+                "topic_id": legacy_id,
+                "global_order": last_order + offset,
+                "title": f"Архивная тема ({legacy_id})",
+                "description": (
+                    "Тема автоматически восстановлена при миграции, потому что на неё "
+                    "ссылаются исторические сессии, но её строки уже нет в таблице тем."
+                ),
+                "status": "archived",
+            }
+        )
+    return rows
+
+
 class LegacyMigrator:
     def __init__(self, repository: LearningRepository):
         self.repository = repository
 
     def inspect(self, snapshot: LegacySnapshot) -> MigrationReport:
+        restored_topics = _restored_topic_ids(snapshot)
         report = MigrationReport(
-            topics=len([row for row in snapshot.topics if _text(row.get("topic_id"))]),
+            topics=(
+                len([row for row in snapshot.topics if _text(row.get("topic_id"))])
+                + len(restored_topics)
+            ),
             sessions=len([row for row in snapshot.sessions if _text(row.get("session_id"))]),
             tasks=len([row for row in snapshot.tasks if _text(row.get("task_id"))]),
             answers=len([row for row in snapshot.answers if _text(row.get("answer_id"))]),
             materials=len(snapshot.materials),
+            restored_topics=restored_topics,
             dry_run=True,
         )
-        topic_ids = {_text(row.get("topic_id")) for row in snapshot.topics}
         session_ids = {_text(row.get("session_id")) for row in snapshot.sessions}
         task_ids = {_text(row.get("task_id")) for row in snapshot.tasks}
 
         for row in snapshot.sessions:
-            if _text(row.get("topic_id")) not in topic_ids:
+            if not _text(row.get("topic_id")):
                 report.unresolved_references.append(
-                    f"Сессия {_text(row.get('session_id'))}: неизвестная тема {_text(row.get('topic_id'))}."
+                    f"Сессия {_text(row.get('session_id'))}: не указана тема."
                 )
         for row in snapshot.tasks:
             if _text(row.get("session_id")) not in session_ids:
@@ -163,7 +204,7 @@ class LegacyMigrator:
                 db.flush()
 
             ordered_topics = sorted(
-                [row for row in snapshot.topics if _text(row.get("topic_id"))],
+                _topic_rows_with_restored_history(snapshot),
                 key=lambda row: (
                     _integer(row.get("global_order"), 10_000),
                     _text(row.get("stage")),

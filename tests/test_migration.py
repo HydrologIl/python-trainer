@@ -111,6 +111,29 @@ class LegacyMigrationTests(unittest.TestCase):
         self.assertEqual(attempts[0]["verdict"], "correct")
         self.assertEqual(len(attempts[0]["knowledge_ids"]), 1)
 
+    def test_missing_topic_is_restored_as_archived_module(self) -> None:
+        self.snapshot.sessions[0]["topic_id"] = "stage0_block6"
+
+        report = self.migrator.inspect(self.snapshot)
+
+        self.assertEqual(report.unresolved_references, [])
+        self.assertEqual(report.restored_topics, ["stage0_block6"])
+        self.assertEqual(report.topics, 2)
+
+        self.migrator.migrate(self.snapshot)
+        self.migrator.migrate(self.snapshot)
+
+        course = self.repository.list_courses()[0]
+        modules = self.repository.list_modules(course.id)
+        restored = next(module for module in modules if module.legacy_id == "stage0_block6")
+        self.assertEqual(restored.status, "archived")
+        self.assertIn("stage0_block6", restored.title)
+        with self.repository.transaction() as db:
+            session = db.scalar(
+                select(ReviewSession).where(ReviewSession.legacy_id == "legacy_session_1")
+            )
+            self.assertEqual(session.module_id, restored.id)
+
 
 if __name__ == "__main__":
     unittest.main()

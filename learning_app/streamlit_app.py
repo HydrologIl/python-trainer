@@ -494,9 +494,16 @@ def render_migration(repository: LearningRepository) -> None:
             "задания": report.tasks,
             "ответы": report.answers,
             "материалы": report.materials,
+            "восстановленные архивные темы": report.restored_topics,
             "нарушенные ссылки": report.unresolved_references,
         }
     )
+    if report.restored_topics:
+        st.info(
+            "Миграция автоматически восстановит отсутствующие темы как архивные: "
+            + ", ".join(report.restored_topics)
+            + ". Исторические сессии и ответы сохранятся."
+        )
     if report.unresolved_references:
         st.error("Сначала исправь нарушенные ссылки в исходной таблице.")
         return
