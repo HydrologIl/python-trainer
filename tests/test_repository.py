@@ -202,6 +202,9 @@ class RepositoryTests(unittest.TestCase):
             "ошибка в условии",
             "Не хватает данных для ответа.",
         )
+        flagged = self.repository.get_task(task.id)
+        self.assertEqual(flagged.status, "bad_task")
+        self.assertTrue(self.repository.complete_session_if_ready(review.id))
         feedback = self.repository.get_recent_task_feedback(self.module.id)
         self.assertEqual(len(feedback), 1)
         self.assertEqual(feedback[0]["task_prompt"], "Верно?")

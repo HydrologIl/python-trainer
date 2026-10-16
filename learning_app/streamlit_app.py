@@ -14,6 +14,9 @@ from learning_app.repository import LearningRepository, ReviewAssignment, Task
 from learning_app.services import LearningService
 
 
+CLOSED_TASK_STATUSES = {"correct", "abandoned", "bad_task"}
+
+
 def _secret(name: str, default: str = "") -> str:
     try:
         value = st.secrets.get(name, default)
@@ -349,7 +352,7 @@ def render_session(
         (
             task_index
             for task_index, candidate in enumerate(tasks)
-            if candidate.status not in {"correct", "abandoned", "bad_task"}
+            if candidate.status not in CLOSED_TASK_STATUSES
         ),
         len(tasks) - 1,
     )
@@ -359,13 +362,21 @@ def render_session(
     else:
         index = min(st.session_state.get(index_key, first_unfinished), len(tasks) - 1)
     st.session_state[index_key] = index
-    completed = sum(task.status in {"correct", "abandoned", "bad_task"} for task in tasks)
+    completed = sum(task.status in CLOSED_TASK_STATUSES for task in tasks)
     st.progress(completed / len(tasks))
     st.caption(f"Завершено: {completed}/{len(tasks)}")
+    notice_key = f"task_action_notice_{session_id}"
+    notice = st.session_state.pop(notice_key, None)
+    if notice:
+        st.success(notice)
 
     task = tasks[index]
     st.subheader(f"Задание {index + 1} из {len(tasks)}")
     st.caption(f"{task.format} · сложность {task.difficulty}/5 · статус {task.status}")
+    if task.status == "bad_task":
+        st.info("Задание отмечено как плохое, исключено из результатов и завершено.")
+    elif task.status == "abandoned":
+        st.info("Задание исключено из результатов и завершено без ответа.")
     st.write(task.prompt)
     if task.stimulus:
         st.code(task.stimulus)
@@ -379,7 +390,7 @@ def render_session(
             st.session_state[index_key] = index - 1
             st.rerun()
     with col_submit:
-        if st.button("Проверить", disabled=task.status in {"correct", "bad_task", "abandoned"}, key=f"submit_{task.id}"):
+        if st.button("Проверить", disabled=task.status in CLOSED_TASK_STATUSES, key=f"submit_{task.id}"):
             if answer in (None, "", []):
                 st.warning("Сначала введи ответ.")
             else:
@@ -392,7 +403,7 @@ def render_session(
                         st.error("Не удалось проверить ответ.")
                         st.code(str(exc))
     with col_skip:
-        if st.button("Отложить", disabled=task.status in {"correct", "bad_task", "abandoned"}, key=f"skip_{task.id}"):
+        if st.button("Отложить", disabled=task.status in CLOSED_TASK_STATUSES, key=f"skip_{task.id}"):
             repository.set_task_status(task.id, "skipped")
             st.session_state[index_key] = min(index + 1, len(tasks) - 1)
             st.rerun()
@@ -420,13 +431,56 @@ def render_session(
             key=f"issue_{task.id}",
         )
         comment = st.text_area("Комментарий", key=f"issue_comment_{task.id}")
-        if st.button("Пометить как плохое", key=f"bad_{task.id}"):
+        action_disabled = task.status in CLOSED_TASK_STATUSES
+        if st.button(
+            "Пометить как плохое",
+            disabled=action_disabled,
+            key=f"bad_{task.id}",
+        ):
             repository.add_task_feedback(task.id, issue, comment)
+            repository.complete_session_if_ready(session_id)
+            refreshed_tasks = repository.list_tasks(session_id)
+            st.session_state[index_key] = _next_unfinished_task_index(
+                refreshed_tasks,
+                index,
+            )
+            st.session_state[notice_key] = (
+                "Жалоба сохранена. Задание исключено из результатов и засчитано "
+                "как завершённое."
+            )
             st.rerun()
-        if st.button("Отказаться от задания", key=f"abandon_{task.id}"):
+        if st.button(
+            "Отказаться от задания",
+            disabled=action_disabled,
+            key=f"abandon_{task.id}",
+        ):
             repository.set_task_status(task.id, "abandoned")
             repository.complete_session_if_ready(session_id)
+            refreshed_tasks = repository.list_tasks(session_id)
+            st.session_state[index_key] = _next_unfinished_task_index(
+                refreshed_tasks,
+                index,
+            )
+            st.session_state[notice_key] = (
+                "Задание исключено из результатов и засчитано как завершённое."
+            )
             st.rerun()
+
+
+def _next_unfinished_task_index(tasks: list[Task], current_index: int) -> int:
+    if not tasks:
+        return 0
+    ordered_indexes = list(range(current_index + 1, len(tasks))) + list(
+        range(0, current_index)
+    )
+    return next(
+        (
+            task_index
+            for task_index in ordered_indexes
+            if tasks[task_index].status not in CLOSED_TASK_STATUSES
+        ),
+        min(current_index, len(tasks) - 1),
+    )
 
 
 def _text_answer(value: Any) -> str:
