@@ -110,14 +110,20 @@ def run_universal_app() -> None:
         if database_url.startswith("sqlite"):
             st.warning("SQLite подходит для локальной разработки. Для Streamlit Cloud задай PostgreSQL DATABASE_URL.")
 
-    tabs = st.tabs(["Сегодня", "Курсы", "Прогресс", "Миграция"])
-    with tabs[0]:
+    section = st.radio(
+        "Раздел",
+        ["Сегодня", "Курсы", "Прогресс", "Миграция"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="main_section",
+    )
+    if section == "Сегодня":
         render_today(repository, database_url, provider_name, provider_model, today)
-    with tabs[1]:
+    elif section == "Курсы":
         render_courses(repository, database_url, provider_name, provider_model)
-    with tabs[2]:
+    elif section == "Прогресс":
         render_progress(repository)
-    with tabs[3]:
+    else:
         render_migration(repository)
 
 
@@ -285,16 +291,17 @@ def render_today(
     today: date,
 ) -> None:
     st.header("Сегодня")
-    assignments = repository.list_due_assignments(today)
-    if not assignments:
+    assignment_rows = repository.list_due_assignments_with_modules(today)
+    if not assignment_rows:
         st.success("На выбранную дату нет повторений.")
         return
 
-    assignment = st.selectbox(
+    assignment_row = st.selectbox(
         "Повторение",
-        assignments,
-        format_func=lambda item: _assignment_label(repository, item, today),
+        assignment_rows,
+        format_func=lambda item: _assignment_label(item[0], item[1], today),
     )
+    assignment = assignment_row[0]
     review_session = repository.get_session_for_assignment(assignment.id)
     if review_session is None:
         st.write(
@@ -324,16 +331,14 @@ def render_today(
 
 
 def _assignment_label(
-    repository: LearningRepository,
     assignment: ReviewAssignment,
+    module_title: str,
     reference_date: date,
 ) -> str:
-    module = repository.get_module(assignment.module_id)
-    title = module.title if module else assignment.module_id
     kind = "восстановление" if assignment.kind == "recovery" else f"день {assignment.repetition_day}"
     overdue = (reference_date - assignment.scheduled_date).days
     overdue_text = f" · просрочено {overdue} дн." if overdue > 0 else ""
-    return f"{title} · {kind} · {assignment.scheduled_date.isoformat()}{overdue_text}"
+    return f"{module_title} · {kind} · {assignment.scheduled_date.isoformat()}{overdue_text}"
 
 
 def render_session(
@@ -560,21 +565,23 @@ def render_answer_input(task: Task, previous_answer: Any = None) -> Any:
 
 def render_progress(repository: LearningRepository) -> None:
     st.header("Прогресс")
-    courses = repository.list_courses()
-    if not courses:
+    rows = repository.get_progress_overview()
+    if not rows:
         st.info("Пока нет курсов.")
         return
-    for course in courses:
-        st.subheader(course.title)
-        modules = repository.list_modules(course.id)
-        if not modules:
+
+    course_ids = list(dict.fromkeys(row.course_id for row in rows))
+    for course_id in course_ids:
+        course_rows = [row for row in rows if row.course_id == course_id]
+        st.subheader(course_rows[0].course_title)
+        module_rows = [row for row in course_rows if row.module_id is not None]
+        if not module_rows:
             st.caption("Нет модулей.")
             continue
-        for module in modules:
-            attempts = repository.get_learning_attempts(module.id)
+        for row in module_rows:
             st.write(
-                f"**{module.position}. {module.title}** · статус `{module.status}` · "
-                f"попыток: {len(attempts)}"
+                f"**{row.module_position}. {row.module_title}** · "
+                f"статус `{row.module_status}` · попыток: {row.attempt_count}"
             )
 
 

@@ -30,6 +30,12 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(len(due), 5)
         self.assertTrue(all(item.task_count == 40 for item in due))
 
+        due_with_modules = self.repository.list_due_assignments_with_modules(
+            date(2026, 11, 1)
+        )
+        self.assertEqual(len(due_with_modules), 5)
+        self.assertTrue(all(title == "Функции" for _, title in due_with_modules))
+
     def test_changing_learned_date_replaces_only_pending_regular_schedule(self) -> None:
         self.repository.mark_module_studied(self.module.id, date(2026, 10, 1))
         self.repository.mark_module_studied(self.module.id, date(2026, 10, 10))
@@ -210,6 +216,11 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(feedback[0]["task_prompt"], "Верно?")
         self.assertEqual(feedback[0]["issue_type"], "ошибка в условии")
         self.assertEqual(feedback[0]["comment"], "Не хватает данных для ответа.")
+
+        progress = self.repository.get_progress_overview()
+        module_progress = next(row for row in progress if row.module_id == self.module.id)
+        self.assertEqual(module_progress.course_title, "Python")
+        self.assertEqual(module_progress.attempt_count, 2)
 
 
 if __name__ == "__main__":

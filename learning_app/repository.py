@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Iterator, Optional
 
@@ -34,6 +35,17 @@ def new_id(prefix: str) -> str:
 
 def utc_now() -> datetime:
     return datetime.utcnow().replace(microsecond=0)
+
+
+@dataclass(frozen=True)
+class ProgressRow:
+    course_id: str
+    course_title: str
+    module_id: Optional[str]
+    module_position: Optional[int]
+    module_title: Optional[str]
+    module_status: Optional[str]
+    attempt_count: int
 
 
 class Base(DeclarativeBase):
@@ -470,6 +482,22 @@ class LearningRepository:
                 )
             )
 
+    def list_due_assignments_with_modules(
+        self,
+        today: date,
+    ) -> list[tuple[ReviewAssignment, str]]:
+        with self._sessions() as session:
+            rows = session.execute(
+                select(ReviewAssignment, Module.title)
+                .join(Module, Module.id == ReviewAssignment.module_id)
+                .where(
+                    ReviewAssignment.scheduled_date <= today,
+                    ReviewAssignment.status.in_(["pending", "in_progress"]),
+                )
+                .order_by(ReviewAssignment.scheduled_date)
+            ).all()
+        return [(assignment, module_title) for assignment, module_title in rows]
+
     def get_assignment(self, assignment_id: str) -> Optional[ReviewAssignment]:
         with self._sessions() as session:
             return session.get(ReviewAssignment, assignment_id)
@@ -720,6 +748,55 @@ class LearningRepository:
             )
             row["knowledge_ids"].append(knowledge_id)
         return list(grouped.values())
+
+    def get_progress_overview(self) -> list[ProgressRow]:
+        with self._sessions() as session:
+            rows = session.execute(
+                select(
+                    Course.id,
+                    Course.title,
+                    Module.id,
+                    Module.position,
+                    Module.title,
+                    Module.status,
+                    func.count(Attempt.id),
+                )
+                .select_from(Course)
+                .outerjoin(Module, Module.course_id == Course.id)
+                .outerjoin(Task, Task.module_id == Module.id)
+                .outerjoin(Attempt, Attempt.task_id == Task.id)
+                .where(Course.status != "archived")
+                .group_by(
+                    Course.id,
+                    Course.title,
+                    Course.created_at,
+                    Module.id,
+                    Module.position,
+                    Module.title,
+                    Module.status,
+                )
+                .order_by(Course.created_at, Module.position)
+            ).all()
+        return [
+            ProgressRow(
+                course_id=course_id,
+                course_title=course_title,
+                module_id=module_id,
+                module_position=module_position,
+                module_title=module_title,
+                module_status=module_status,
+                attempt_count=int(attempt_count or 0),
+            )
+            for (
+                course_id,
+                course_title,
+                module_id,
+                module_position,
+                module_title,
+                module_status,
+                attempt_count,
+            ) in rows
+        ]
 
     def get_recent_history(self, module_id: str, limit: int = 30) -> list[dict[str, Any]]:
         with self._sessions() as session:
