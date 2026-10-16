@@ -12,6 +12,23 @@ import streamlit as st
 from learning_app.ai import create_ai_provider
 from learning_app.repository import LearningRepository, ReviewAssignment, Task
 from learning_app.services import LearningService
+from learning_app.training_profiles import (
+    ANALYSIS_GROUP,
+    CREATION_GROUP,
+    DEFAULT_CUSTOM_CONFIG,
+    FORMAT_LABELS,
+    GROUP_LABELS,
+    GROUP_ORDER,
+    PROFILE_DESCRIPTIONS,
+    PROFILE_KEYS,
+    PROFILE_LABELS,
+    THEORY_GROUP,
+    build_task_plan,
+    custom_config_errors,
+    formats_for_group,
+    normalize_custom_config,
+    task_plan_summary,
+)
 
 
 CLOSED_TASK_STATUSES = {"correct", "abandoned", "bad_task"}
@@ -141,6 +158,152 @@ def _service(database_url: str, provider_name: str, provider_model: str) -> Lear
         st.stop()
 
 
+def _profile_option_label(profile_key: str) -> str:
+    return PROFILE_LABELS.get(profile_key, profile_key)
+
+
+def _custom_profile_editor(
+    key_prefix: str,
+    stored_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    config = normalize_custom_config(stored_config or DEFAULT_CUSTOM_CONFIG)
+    weights = config["group_weights"]
+    creation = int(
+        st.number_input(
+            "Создание, %",
+            min_value=0,
+            max_value=100,
+            value=int(weights[CREATION_GROUP]),
+            key=f"{key_prefix}_creation",
+        )
+    )
+    analysis = int(
+        st.number_input(
+            "Анализ, %",
+            min_value=0,
+            max_value=100,
+            value=int(weights[ANALYSIS_GROUP]),
+            key=f"{key_prefix}_analysis",
+        )
+    )
+    theory = max(0, 100 - creation - analysis)
+    st.caption(f"Теория: {theory}% · всего: {creation + analysis + theory}%")
+
+    selected_formats: list[str] = []
+    with st.expander("Разрешённые форматы"):
+        for group in GROUP_ORDER:
+            group_formats = formats_for_group(group)
+            defaults = [
+                task_format
+                for task_format in config["allowed_formats"]
+                if task_format in group_formats
+            ]
+            selected_formats.extend(
+                st.multiselect(
+                    GROUP_LABELS[group],
+                    group_formats,
+                    default=defaults,
+                    format_func=lambda value: FORMAT_LABELS[value],
+                    key=f"{key_prefix}_formats_{group}",
+                )
+            )
+
+    return {
+        "group_weights": {
+            CREATION_GROUP: creation,
+            ANALYSIS_GROUP: analysis,
+            THEORY_GROUP: theory,
+        },
+        "allowed_formats": selected_formats,
+    }
+
+
+def _render_course_profile_settings(repository: LearningRepository, course: Any) -> None:
+    setting = repository.get_training_profile_setting("course", course.id)
+    fallback_key = "python_practice" if course.legacy_id == "legacy:python" else "auto"
+    current_key = setting.profile_key if setting else fallback_key
+    current_config = dict(setting.config or {}) if setting else {}
+
+    with st.expander("Профиль тренировок курса"):
+        selected = st.selectbox(
+            "Профиль по умолчанию",
+            PROFILE_KEYS,
+            index=PROFILE_KEYS.index(current_key) if current_key in PROFILE_KEYS else 0,
+            format_func=_profile_option_label,
+            key=f"course_profile_{course.id}",
+        )
+        st.caption(PROFILE_DESCRIPTIONS[selected])
+        config = (
+            _custom_profile_editor(f"course_custom_{course.id}", current_config)
+            if selected == "custom"
+            else {}
+        )
+        errors = custom_config_errors(config) if selected == "custom" else []
+        for error in errors:
+            st.warning(error)
+        if st.button(
+            "Сохранить профиль курса",
+            disabled=bool(errors),
+            key=f"save_course_profile_{course.id}",
+        ):
+            repository.set_training_profile("course", course.id, selected, config)
+            st.success("Профиль курса сохранён.")
+            st.rerun()
+
+
+def _render_module_profile_settings(
+    repository: LearningRepository,
+    module: Any,
+) -> None:
+    setting = repository.get_training_profile_setting("module", module.id)
+    options = ("inherit",) + PROFILE_KEYS
+    current_key = setting.profile_key if setting else "inherit"
+    current_config = dict(setting.config or {}) if setting else {}
+    course = repository.get_course(module.course_id)
+    course_setting = repository.get_training_profile_setting("course", module.course_id)
+    inherited_key = (
+        course_setting.profile_key
+        if course_setting is not None
+        else "python_practice"
+        if course is not None and course.legacy_id == "legacy:python"
+        else "auto"
+    )
+
+    with st.expander("Профиль тренировок модуля"):
+        selected = st.selectbox(
+            "Настройка модуля",
+            options,
+            index=options.index(current_key) if current_key in options else 0,
+            format_func=lambda value: (
+                f"Использовать профиль курса ({PROFILE_LABELS[inherited_key]})"
+                if value == "inherit"
+                else _profile_option_label(value)
+            ),
+            key=f"module_profile_{module.id}",
+        )
+        if selected != "inherit":
+            st.caption(PROFILE_DESCRIPTIONS[selected])
+        config = (
+            _custom_profile_editor(f"module_custom_{module.id}", current_config)
+            if selected == "custom"
+            else {}
+        )
+        errors = custom_config_errors(config) if selected == "custom" else []
+        for error in errors:
+            st.warning(error)
+        if st.button(
+            "Сохранить профиль модуля",
+            disabled=bool(errors),
+            key=f"save_module_profile_{module.id}",
+        ):
+            if selected == "inherit":
+                repository.clear_training_profile("module", module.id)
+            else:
+                repository.set_training_profile("module", module.id, selected, config)
+            st.success("Профиль модуля сохранён.")
+            st.rerun()
+
+
 def render_courses(
     repository: LearningRepository,
     database_url: str,
@@ -166,6 +329,7 @@ def render_courses(
         return
 
     course = st.selectbox("Курс", courses, format_func=lambda item: item.title)
+    _render_course_profile_settings(repository, course)
     with st.expander("Добавить модуль"):
         with st.form(f"new_module_{course.id}"):
             module_title = st.text_input("Название модуля")
@@ -197,6 +361,7 @@ def render_courses(
         f"Статус: {module.status} · дата изучения: "
         f"{module.learned_date.isoformat() if module.learned_date else 'не задана'}"
     )
+    _render_module_profile_settings(repository, module)
 
     col_material, col_schedule = st.columns([3, 2])
     with col_material:
@@ -304,13 +469,93 @@ def render_today(
     assignment = assignment_row[0]
     review_session = repository.get_session_for_assignment(assignment.id)
     if review_session is None:
+        inherited_profile = repository.resolve_training_profile(assignment.module_id)
+        assignment_setting = repository.get_training_profile_setting(
+            "assignment",
+            assignment.id,
+        )
+        profile_options = ("inherit",) + PROFILE_KEYS
+        current_choice = (
+            assignment_setting.profile_key if assignment_setting is not None else "inherit"
+        )
         st.write(
             f"Будет создано **{assignment.task_count}** заданий. "
             f"Тип: **{'восстановительное' if assignment.kind == 'recovery' else 'регулярное'}**."
         )
         if assignment.reason:
             st.caption(f"Фокус: {assignment.reason}")
-        if st.button("Сгенерировать и начать", key=f"generate_{assignment.id}"):
+
+        with st.expander("Состав тренировки", expanded=True):
+            selected_profile = st.selectbox(
+                "Профиль этой тренировки",
+                profile_options,
+                index=(
+                    profile_options.index(current_choice)
+                    if current_choice in profile_options
+                    else 0
+                ),
+                format_func=lambda value: (
+                    "По настройкам модуля "
+                    f"({PROFILE_LABELS[inherited_profile.profile_key]})"
+                    if value == "inherit"
+                    else _profile_option_label(value)
+                ),
+                key=f"assignment_profile_{assignment.id}",
+            )
+            if selected_profile == "inherit":
+                plan_profile_key = inherited_profile.profile_key
+                plan_config = inherited_profile.config
+            else:
+                plan_profile_key = selected_profile
+                plan_config = (
+                    dict(assignment_setting.config or {})
+                    if assignment_setting is not None
+                    and assignment_setting.profile_key == "custom"
+                    else {}
+                )
+            if selected_profile == "custom":
+                plan_config = _custom_profile_editor(
+                    f"assignment_custom_{assignment.id}",
+                    plan_config,
+                )
+
+            plan_errors = (
+                custom_config_errors(plan_config)
+                if plan_profile_key == "custom"
+                else []
+            )
+            for error in plan_errors:
+                st.warning(error)
+            knowledge = repository.list_knowledge_items(assignment.module_id)
+            task_plan = None
+            if not plan_errors:
+                try:
+                    task_plan = build_task_plan(
+                        plan_profile_key,
+                        assignment.task_count,
+                        (item.kind for item in knowledge),
+                        plan_config,
+                    )
+                    st.markdown(f"**{task_plan.profile_label}**")
+                    st.caption(task_plan_summary(task_plan))
+                except ValueError as exc:
+                    plan_errors = [str(exc)]
+                    st.warning(str(exc))
+
+        if st.button(
+            "Сгенерировать и начать",
+            key=f"generate_{assignment.id}",
+            disabled=bool(plan_errors) or task_plan is None,
+        ):
+            if selected_profile == "inherit":
+                repository.clear_training_profile("assignment", assignment.id)
+            else:
+                repository.set_training_profile(
+                    "assignment",
+                    assignment.id,
+                    selected_profile,
+                    plan_config,
+                )
             service = _service(database_url, provider_name, provider_model)
             with st.spinner(f"AI готовит {assignment.task_count} заданий..."):
                 try:

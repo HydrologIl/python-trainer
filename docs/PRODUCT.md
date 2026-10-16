@@ -28,6 +28,12 @@ without losing progress.
 - Practical formats initially include debugging, output prediction, code or
   configuration authoring, and open practical answers.
 - A regular review contains 40 items and progresses from easier to harder work.
+- Training composition is controlled by a profile at course level, can be
+  overridden for a module, and can be changed once for an individual session.
+  Presets are automatic, practical, balanced, theoretical, and coding
+  10/10/20; a custom profile controls group weights and allowed formats.
+- The migrated Python course defaults to 10 debugging tasks, 10 output
+  prediction tasks, and 20 code-writing tasks in a 40-item regular review.
 - A recovery review contains 15–20 new variants focused on weak knowledge and
   skills. It is due the day after the triggering mistakes and does not move the
   regular schedule.
@@ -52,6 +58,8 @@ without losing progress.
   abandoned. Flagged bad tasks are excluded.
 - AI output is validated before a session is committed. A failed generation
   must not leave an empty session.
+- Generated tasks must match the selected profile exactly. Valid tasks are kept
+  and only duplicate or out-of-profile slots are regenerated.
 
 ## Migration contract
 

@@ -36,6 +36,39 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(len(due_with_modules), 5)
         self.assertTrue(all(title == "Функции" for _, title in due_with_modules))
 
+    def test_training_profile_precedence_and_inheritance(self) -> None:
+        resolved = self.repository.resolve_training_profile(self.module.id)
+        self.assertEqual(resolved.profile_key, "auto")
+
+        self.repository.set_training_profile("course", self.course.id, "practical")
+        resolved = self.repository.resolve_training_profile(self.module.id)
+        self.assertEqual((resolved.profile_key, resolved.source), ("practical", "course"))
+
+        self.repository.set_training_profile("module", self.module.id, "theoretical")
+        resolved = self.repository.resolve_training_profile(self.module.id)
+        self.assertEqual((resolved.profile_key, resolved.source), ("theoretical", "module"))
+
+        self.repository.mark_module_studied(self.module.id, date(2026, 10, 1))
+        assignment = self.repository.list_due_assignments(date(2026, 10, 2))[0]
+        custom = {
+            "group_weights": {"creation": 60, "analysis": 20, "theory": 20},
+            "allowed_formats": ["write_code", "debug", "single_choice"],
+        }
+        self.repository.set_training_profile(
+            "assignment", assignment.id, "custom", custom
+        )
+        resolved = self.repository.resolve_training_profile(
+            self.module.id, assignment.id
+        )
+        self.assertEqual((resolved.profile_key, resolved.source), ("custom", "assignment"))
+        self.assertEqual(resolved.config, custom)
+
+        self.repository.clear_training_profile("assignment", assignment.id)
+        resolved = self.repository.resolve_training_profile(
+            self.module.id, assignment.id
+        )
+        self.assertEqual(resolved.profile_key, "theoretical")
+
     def test_changing_learned_date_replaces_only_pending_regular_schedule(self) -> None:
         self.repository.mark_module_studied(self.module.id, date(2026, 10, 1))
         self.repository.mark_module_studied(self.module.id, date(2026, 10, 10))

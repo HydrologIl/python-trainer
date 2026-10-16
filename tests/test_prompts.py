@@ -49,12 +49,19 @@ class TaskGenerationPromptTests(unittest.TestCase):
                     "comment": "Не показаны элементы для сопоставления.",
                 }
             ],
+            task_plan={
+                "group_counts": {"creation": 5, "analysis": 3, "theory": 2},
+                "format_counts": {},
+                "allowed_formats": ["write_code", "debug", "single_choice"],
+            },
         )
 
         self.assertIn("не повторяй такой же дефект", system)
         self.assertIn("<past_task_feedback>", user)
         self.assertIn("Сопоставь приём с назначением функции.", user)
         self.assertIn("Не показаны элементы для сопоставления.", user)
+        self.assertIn("required_task_plan", system)
+        self.assertIn('"creation": 5', user)
 
 
 if __name__ == "__main__":

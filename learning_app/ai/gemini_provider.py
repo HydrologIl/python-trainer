@@ -65,6 +65,7 @@ class GeminiProvider(AIProvider):
         task_count: int,
         avoid_tasks: list[dict[str, Any]] | None = None,
         task_feedback: list[dict[str, Any]] | None = None,
+        task_plan: dict[str, Any] | None = None,
     ) -> TaskBatch:
         system_text, user_text = build_task_generation_prompt(
             module_title,
@@ -76,6 +77,7 @@ class GeminiProvider(AIProvider):
             task_count,
             avoid_tasks,
             task_feedback,
+            task_plan,
         )
         return self._parse(TaskBatch, system_text, user_text)
 

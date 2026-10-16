@@ -29,6 +29,7 @@ Core entities:
 - `task_knowledge_items`
 - `attempts`
 - `task_feedback`
+- `training_profile_settings` (course, module, or one-session overrides)
 
 Legacy IDs are stored on migrated records. JSON columns hold answer options,
 matching pairs, and provider metadata while stable query fields remain normal
@@ -52,6 +53,12 @@ Generation receives a compact learning profile, not an unbounded transcript:
 knowledge mastery, recent representative tasks, recent attempts, normalized
 error types, and task complaints. The prompt clearly separates trusted product
 instructions from untrusted user/source content.
+
+The application resolves the profile in assignment → module → course order and
+turns it into an exact integer task plan. Generic profiles constrain the three
+groups (creation, analysis, theory); the coding profile constrains exact formats.
+The validator keeps conforming unique tasks and asks the provider only for the
+missing group or format counts.
 
 ## Reliability
 

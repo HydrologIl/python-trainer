@@ -48,6 +48,13 @@ class ProgressRow:
     attempt_count: int
 
 
+@dataclass(frozen=True)
+class ProfilePreference:
+    profile_key: str
+    config: dict[str, Any]
+    source: str
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -61,6 +68,16 @@ class Course(Base):
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
     legacy_id: Mapped[Optional[str]] = mapped_column(String(240), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+
+class TrainingProfileSetting(Base):
+    __tablename__ = "training_profile_settings"
+
+    scope_type: Mapped[str] = mapped_column(String(32), primary_key=True)
+    scope_id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    profile_key: Mapped[str] = mapped_column(String(48), nullable=False)
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
 
 
@@ -264,6 +281,99 @@ class LearningRepository:
             if not include_archived:
                 statement = statement.where(Course.status != "archived")
             return list(session.scalars(statement))
+
+    def get_course(self, course_id: str) -> Optional[Course]:
+        with self._sessions() as session:
+            return session.get(Course, course_id)
+
+    def get_training_profile_setting(
+        self,
+        scope_type: str,
+        scope_id: str,
+    ) -> Optional[TrainingProfileSetting]:
+        with self._sessions() as session:
+            return session.get(TrainingProfileSetting, (scope_type, scope_id))
+
+    def set_training_profile(
+        self,
+        scope_type: str,
+        scope_id: str,
+        profile_key: str,
+        config: Optional[dict[str, Any]] = None,
+    ) -> None:
+        if scope_type not in {"course", "module", "assignment"}:
+            raise ValueError("Неизвестный уровень профиля тренировки.")
+        if not profile_key.strip():
+            raise ValueError("Профиль тренировки не задан.")
+        with self.transaction() as session:
+            setting = session.get(TrainingProfileSetting, (scope_type, scope_id))
+            if setting is None:
+                setting = TrainingProfileSetting(
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                    profile_key=profile_key,
+                    config=config or {},
+                )
+                session.add(setting)
+            else:
+                setting.profile_key = profile_key
+                setting.config = config or {}
+                setting.updated_at = utc_now()
+
+    def clear_training_profile(self, scope_type: str, scope_id: str) -> None:
+        with self.transaction() as session:
+            setting = session.get(TrainingProfileSetting, (scope_type, scope_id))
+            if setting is not None:
+                session.delete(setting)
+
+    def resolve_training_profile(
+        self,
+        module_id: str,
+        assignment_id: Optional[str] = None,
+    ) -> ProfilePreference:
+        with self._sessions() as session:
+            module = session.get(Module, module_id)
+            if module is None:
+                raise ValueError("Модуль не найден.")
+
+            if assignment_id:
+                assignment_setting = session.get(
+                    TrainingProfileSetting,
+                    ("assignment", assignment_id),
+                )
+                if assignment_setting is not None:
+                    return ProfilePreference(
+                        assignment_setting.profile_key,
+                        dict(assignment_setting.config or {}),
+                        "assignment",
+                    )
+
+            module_setting = session.get(
+                TrainingProfileSetting,
+                ("module", module_id),
+            )
+            if module_setting is not None:
+                return ProfilePreference(
+                    module_setting.profile_key,
+                    dict(module_setting.config or {}),
+                    "module",
+                )
+
+            course_setting = session.get(
+                TrainingProfileSetting,
+                ("course", module.course_id),
+            )
+            if course_setting is not None:
+                return ProfilePreference(
+                    course_setting.profile_key,
+                    dict(course_setting.config or {}),
+                    "course",
+                )
+
+            course = session.get(Course, module.course_id)
+            if course is not None and course.legacy_id == "legacy:python":
+                return ProfilePreference("python_practice", {}, "legacy_default")
+            return ProfilePreference("auto", {}, "default")
 
     def add_module(
         self,

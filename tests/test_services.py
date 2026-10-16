@@ -50,18 +50,49 @@ class FakeProvider(AIProvider):
         task_count,
         avoid_tasks=None,
         task_feedback=None,
+        task_plan=None,
     ):
-        return TaskBatch(
-            tasks=[
-                TaskDraft(
-                    format=TaskFormat.SINGLE_CHOICE,
-                    difficulty=min(5, 1 + index // 8),
-                    prompt=f"Какой тест проверяет отсутствие null? Вариант {index}",
+        formats = []
+        if task_plan and task_plan.get("format_counts"):
+            for task_format, count in task_plan["format_counts"].items():
+                formats.extend([TaskFormat(task_format)] * count)
+        elif task_plan and task_plan.get("group_counts"):
+            representatives = {
+                "theory": TaskFormat.SINGLE_CHOICE,
+                "analysis": TaskFormat.OUTPUT_PREDICTION,
+                "creation": TaskFormat.WRITE_CODE,
+            }
+            for group, count in task_plan["group_counts"].items():
+                formats.extend([representatives[group]] * count)
+        else:
+            formats = [TaskFormat.SINGLE_CHOICE] * task_count
+        prefix = "Новое задание" if avoid_tasks else "Задание"
+
+        def make_task(index, task_format):
+            common = {
+                "format": task_format,
+                "difficulty": min(5, 1 + index // 8),
+                "prompt": f"{prefix} {index}",
+                "knowledge_client_ids": ["dbt_tests"],
+            }
+            if task_format == TaskFormat.SINGLE_CHOICE:
+                common.update(
                     options=["not_null", "unique"],
                     correct_answer="not_null",
-                    knowledge_client_ids=["dbt_tests"],
                 )
-                for index in range(task_count)
+            elif task_format in {TaskFormat.DEBUG, TaskFormat.OUTPUT_PREDICTION}:
+                common.update(
+                    stimulus="print(1)",
+                    answer_guidance="Проверить объяснение результата.",
+                )
+            else:
+                common["answer_guidance"] = "Проверить корректность решения."
+            return TaskDraft(**common)
+
+        return TaskBatch(
+            tasks=[
+                make_task(index, task_format)
+                for index, task_format in enumerate(formats)
             ]
         )
 
@@ -85,36 +116,76 @@ class DuplicateRepairProvider(FakeProvider):
         task_count,
         avoid_tasks=None,
         task_feedback=None,
+        task_plan=None,
     ):
         self.requested_counts.append(task_count)
         self.avoid_task_counts.append(len(avoid_tasks or []))
+        batch = super().generate_tasks(
+            module_title,
+            module_scope,
+            materials,
+            knowledge_profiles,
+            recent_history,
+            session_kind,
+            task_count,
+            avoid_tasks,
+            task_feedback,
+            task_plan,
+        )
         if len(self.requested_counts) == 1:
-            tasks = [
-                TaskDraft(
-                    format=TaskFormat.SINGLE_CHOICE,
-                    difficulty=min(5, 1 + index // 8),
-                    prompt=f"Задание {index}",
-                    options=["not_null", "unique"],
-                    correct_answer="not_null",
-                    knowledge_client_ids=["dbt_tests"],
-                )
-                for index in range(task_count)
-            ]
-            tasks[-1] = tasks[0].model_copy(deep=True)
-            return TaskBatch(tasks=tasks)
+            first_by_format = {}
+            for index, task in enumerate(batch.tasks):
+                previous = first_by_format.get(task.format)
+                if previous is not None:
+                    batch.tasks[index] = batch.tasks[previous].model_copy(deep=True)
+                    break
+                first_by_format[task.format] = index
+        return batch
 
-        return TaskBatch(
-            tasks=[
-                TaskDraft(
-                    format=TaskFormat.SINGLE_CHOICE,
-                    difficulty=5,
-                    prompt=f"Новое задание {index}",
-                    options=["not_null", "unique"],
-                    correct_answer="not_null",
-                    knowledge_client_ids=["dbt_tests"],
-                )
-                for index in range(task_count)
-            ]
+
+class DistributionRepairProvider(FakeProvider):
+    def __init__(self):
+        self.requested_counts = []
+
+    def generate_tasks(
+        self,
+        module_title,
+        module_scope,
+        materials,
+        knowledge_profiles,
+        recent_history,
+        session_kind,
+        task_count,
+        avoid_tasks=None,
+        task_feedback=None,
+        task_plan=None,
+    ):
+        self.requested_counts.append(task_count)
+        if len(self.requested_counts) == 1:
+            return TaskBatch(
+                tasks=[
+                    TaskDraft(
+                        format=TaskFormat.SINGLE_CHOICE,
+                        difficulty=min(5, 1 + index // 8),
+                        prompt=f"Только теория {index}",
+                        options=["not_null", "unique"],
+                        correct_answer="not_null",
+                        knowledge_client_ids=["dbt_tests"],
+                    )
+                    for index in range(task_count)
+                ]
+            )
+        return super().generate_tasks(
+            module_title,
+            module_scope,
+            materials,
+            knowledge_profiles,
+            recent_history,
+            session_kind,
+            task_count,
+            avoid_tasks,
+            task_feedback,
+            task_plan,
         )
 
 
@@ -154,7 +225,10 @@ class LearningServiceTests(unittest.TestCase):
         self.assertEqual(tasks[0].difficulty, 1)
         self.assertEqual(tasks[-1].difficulty, 5)
 
-        result = self.service.grade_task(tasks[0].id, "unique")
+        locally_graded = next(
+            task for task in tasks if task.format == TaskFormat.SINGLE_CHOICE.value
+        )
+        result = self.service.grade_task(locally_graded.id, "unique")
         self.assertEqual(result.verdict.value, "incorrect")
         tomorrow = date.today() + timedelta(days=1)
         recovery = [
@@ -181,6 +255,34 @@ class LearningServiceTests(unittest.TestCase):
         self.assertEqual(len(self.repository.list_tasks(review.id)), 40)
         self.assertEqual(provider.requested_counts, [40, 1])
         self.assertEqual(provider.avoid_task_counts, [0, 39])
+
+    def test_only_missing_profile_groups_are_regenerated(self) -> None:
+        provider = DistributionRepairProvider()
+        service = LearningService(self.repository, provider)
+        service.analyze_module(self.module.id)
+        self.repository.mark_module_studied(self.module.id, date.today() - timedelta(days=1))
+        assignment = [
+            item
+            for item in self.repository.list_due_assignments(date.today())
+            if item.repetition_day == 1
+        ][0]
+
+        review = service.generate_assignment(assignment.id)
+        tasks = self.repository.list_tasks(review.id)
+
+        self.assertEqual(provider.requested_counts, [40, 16])
+        self.assertEqual(
+            sum(task.format == TaskFormat.SINGLE_CHOICE.value for task in tasks),
+            24,
+        )
+        self.assertEqual(
+            sum(task.format == TaskFormat.OUTPUT_PREDICTION.value for task in tasks),
+            10,
+        )
+        self.assertEqual(
+            sum(task.format == TaskFormat.WRITE_CODE.value for task in tasks),
+            6,
+        )
 
 
 if __name__ == "__main__":

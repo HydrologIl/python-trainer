@@ -10,6 +10,7 @@ from learning_app.grading import grade_locally
 from learning_app.mastery import calculate_mastery, generation_weight
 from learning_app.repository import LearningRepository, ReviewSession, Task
 from learning_app.scheduling import recovery_task_count
+from learning_app.training_profiles import TaskPlan, build_task_plan, select_tasks_for_plan
 from learning_app.validation import duplicate_task_indexes, validate_task_batch
 
 
@@ -89,6 +90,13 @@ class LearningService:
         ]
         recent_history = self.repository.get_recent_history(module.id)
         task_feedback = self.repository.get_recent_task_feedback(module.id)
+        profile = self.repository.resolve_training_profile(module.id, assignment.id)
+        task_plan = build_task_plan(
+            profile.profile_key,
+            assignment.task_count,
+            (item.kind for item in knowledge),
+            profile.config,
+        )
         try:
             batch = self.ai_provider.generate_tasks(
                 module_title=module.title,
@@ -99,9 +107,11 @@ class LearningService:
                 session_kind=assignment.kind,
                 task_count=assignment.task_count,
                 task_feedback=task_feedback,
+                task_plan=task_plan.to_prompt_data(),
             )
-            repaired_tasks = self._replace_duplicate_tasks(
+            repaired_tasks = self._repair_task_batch(
                 tasks=list(batch.tasks),
+                task_plan=task_plan,
                 module_title=module.title,
                 module_scope=module.scope_text or module.description,
                 materials=material_rows,
@@ -114,6 +124,7 @@ class LearningService:
                 repaired_tasks,
                 expected_count=assignment.task_count,
                 allowed_knowledge_ids={item.client_key for item in knowledge},
+                task_plan=task_plan,
             )
             return self.repository.create_session_with_tasks(
                 assignment_id=assignment.id,
@@ -131,10 +142,11 @@ class LearningService:
             )
             raise
 
-    def _replace_duplicate_tasks(
+    def _repair_task_batch(
         self,
         *,
         tasks: list[TaskDraft],
+        task_plan: TaskPlan,
         module_title: str,
         module_scope: str,
         materials: list[dict[str, str]],
@@ -146,14 +158,15 @@ class LearningService:
     ) -> list[TaskDraft]:
         repaired = list(tasks)
         for _ in range(max_repair_rounds):
-            duplicate_indexes = duplicate_task_indexes(repaired)
-            if not duplicate_indexes:
-                return repaired
+            duplicate_set = set(duplicate_task_indexes(repaired))
+            accepted, missing_plan = select_tasks_for_plan(
+                repaired,
+                task_plan,
+                excluded_indexes=duplicate_set,
+            )
+            if missing_plan.task_count == 0:
+                return accepted
 
-            duplicate_set = set(duplicate_indexes)
-            accepted = [
-                task for index, task in enumerate(repaired) if index not in duplicate_set
-            ]
             avoid_tasks = [
                 {
                     "prompt": task.prompt,
@@ -169,17 +182,12 @@ class LearningService:
                 knowledge_profiles=knowledge_profiles,
                 recent_history=recent_history,
                 session_kind=session_kind,
-                task_count=len(duplicate_indexes),
+                task_count=missing_plan.task_count,
                 avoid_tasks=avoid_tasks,
                 task_feedback=task_feedback,
+                task_plan=missing_plan.to_prompt_data(),
             ).tasks
-            if len(replacements) != len(duplicate_indexes):
-                raise ValueError(
-                    "Не удалось заменить дубли: AI вернул "
-                    f"{len(replacements)} заданий вместо {len(duplicate_indexes)}."
-                )
-            for index, replacement in zip(duplicate_indexes, replacements):
-                repaired[index] = replacement
+            repaired = accepted + list(replacements)
 
         return repaired
 

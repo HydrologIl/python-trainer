@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Iterable
 
 from learning_app.domain import LOCALLY_GRADED_FORMATS, TaskDraft, TaskFormat
+from learning_app.training_profiles import TaskPlan, task_plan_errors
 
 
 THEORY_FORMATS = {
@@ -48,6 +49,7 @@ def validate_task_batch(
     tasks: Iterable[TaskDraft],
     expected_count: int,
     allowed_knowledge_ids: set[str],
+    task_plan: TaskPlan | None = None,
 ) -> list[TaskDraft]:
     normalized = list(tasks)
     errors: list[str] = []
@@ -62,6 +64,9 @@ def validate_task_batch(
             "Найдены полностью повторяющиеся задания: "
             f"{len(duplicate_indexes)} (номера: {task_numbers})."
         )
+
+    if task_plan is not None:
+        errors.extend(task_plan_errors(normalized, task_plan))
 
     for index, task in enumerate(normalized, start=1):
         unknown = set(task.knowledge_client_ids) - allowed_knowledge_ids

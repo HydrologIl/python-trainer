@@ -56,6 +56,7 @@ def build_task_generation_prompt(
     task_count: int,
     avoid_tasks: list[dict[str, Any]] | None = None,
     task_feedback: list[dict[str, Any]] | None = None,
+    task_plan: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     profile_rows = [profile.model_dump(mode="json") for profile in knowledge_profiles]
     session_rules = (
@@ -67,7 +68,8 @@ def build_task_generation_prompt(
     replacement_rules = ""
     if avoid_tasks:
         replacement_rules = (
-            " Это запрос на замену обнаруженных полных дублей. Не повторяй ни одну "
+            " Это запрос на замену дублей или заданий, не подошедших по составу. "
+            "Не повторяй ни одну "
             "комбинацию prompt, stimulus и options из списка tasks_to_avoid; создай "
             "только новые задания."
         )
@@ -83,6 +85,9 @@ def build_task_generation_prompt(
 - не повторяй прежнее условие дословно и не раскрывай ответ в формулировке;
 - сложность должна постепенно расти от 1 до 5;
 - используй подходящие форматы из схемы, а не искусственно все форматы сразу;
+- required_task_plan — обязательный точный состав пачки: соблюдай количество
+  по format_counts, если оно заполнено, иначе по group_counts; используй только
+  allowed_formats и сверяй принадлежность форматов к группам по format_groups;
 - для single_choice и multiple_choice дай правдоподобные варианты;
 - для deterministic-форматов обязательно заполни correct_answer;
 - для открытых и практических форматов заполни answer_guidance критериями
@@ -120,6 +125,10 @@ def build_task_generation_prompt(
 <past_task_feedback>
 {_json((task_feedback or [])[-20:])}
 </past_task_feedback>
+
+<required_task_plan>
+{_json(task_plan or {})}
+</required_task_plan>
 """.strip()
     return system, user
 
