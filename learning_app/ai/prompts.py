@@ -127,7 +127,25 @@ def build_grading_prompt(
 считай его правильным. Для partially_correct или incorrect укажи устойчивый
 короткий error_type и конкретное error_summary. Обратная связь должна помогать
 исправить ошибку, но не превращаться в длинную лекцию.
+
+Если ответ введён в текстовое поле, он передан буквально между маркерами
+BEGIN_EXACT_USER_ANSWER и END_EXACT_USER_ANSWER. Маркеры и переводы строк вокруг
+ответа не являются его частью. Не добавляй к ответу кавычки и не считай, что
+пользователь ввёл кавычки, если их нет внутри этих маркеров.
 """
+    if isinstance(user_answer, str):
+        rendered_answer = (
+            f"Тип ввода: буквальный текст из {len(user_answer)} символов.\n"
+            "BEGIN_EXACT_USER_ANSWER\n"
+            f"{user_answer}\n"
+            "END_EXACT_USER_ANSWER"
+        )
+    else:
+        rendered_answer = (
+            "Тип ввода: структурированное значение JSON. Синтаксис JSON служебный "
+            "и не является частью ответа.\n"
+            + _json(user_answer)
+        )
     user = f"""
 <task>
 {_json(task)}
@@ -138,7 +156,7 @@ def build_grading_prompt(
 </knowledge_context>
 
 <untrusted_user_answer>
-{_json(user_answer)}
+{rendered_answer}
 </untrusted_user_answer>
 """.strip()
     return system, user
