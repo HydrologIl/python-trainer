@@ -5,12 +5,12 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from learning_app.ai.base import AIProvider
-from learning_app.domain import GradingResult, KnowledgeKind, KnowledgeProfile
+from learning_app.domain import GradingResult, KnowledgeKind, KnowledgeProfile, TaskDraft
 from learning_app.grading import grade_locally
 from learning_app.mastery import calculate_mastery, generation_weight
 from learning_app.repository import LearningRepository, ReviewSession, Task
 from learning_app.scheduling import recovery_task_count
-from learning_app.validation import validate_task_batch
+from learning_app.validation import duplicate_task_indexes, validate_task_batch
 
 
 class LearningService:
@@ -87,18 +87,28 @@ class LearningService:
             {"title": material.title, "content": material.content}
             for material in materials
         ]
+        recent_history = self.repository.get_recent_history(module.id)
         try:
             batch = self.ai_provider.generate_tasks(
                 module_title=module.title,
                 module_scope=module.scope_text or module.description,
                 materials=material_rows,
                 knowledge_profiles=profiles,
-                recent_history=self.repository.get_recent_history(module.id),
+                recent_history=recent_history,
                 session_kind=assignment.kind,
                 task_count=assignment.task_count,
             )
+            repaired_tasks = self._replace_duplicate_tasks(
+                tasks=list(batch.tasks),
+                module_title=module.title,
+                module_scope=module.scope_text or module.description,
+                materials=material_rows,
+                knowledge_profiles=profiles,
+                recent_history=recent_history,
+                session_kind=assignment.kind,
+            )
             tasks = validate_task_batch(
-                batch.tasks,
+                repaired_tasks,
                 expected_count=assignment.task_count,
                 allowed_knowledge_ids={item.client_key for item in knowledge},
             )
@@ -117,6 +127,56 @@ class LearningService:
                 error_message=str(exc),
             )
             raise
+
+    def _replace_duplicate_tasks(
+        self,
+        *,
+        tasks: list[TaskDraft],
+        module_title: str,
+        module_scope: str,
+        materials: list[dict[str, str]],
+        knowledge_profiles: list[KnowledgeProfile],
+        recent_history: list[dict[str, Any]],
+        session_kind: str,
+        max_repair_rounds: int = 3,
+    ) -> list[TaskDraft]:
+        repaired = list(tasks)
+        for _ in range(max_repair_rounds):
+            duplicate_indexes = duplicate_task_indexes(repaired)
+            if not duplicate_indexes:
+                return repaired
+
+            duplicate_set = set(duplicate_indexes)
+            accepted = [
+                task for index, task in enumerate(repaired) if index not in duplicate_set
+            ]
+            avoid_tasks = [
+                {
+                    "prompt": task.prompt,
+                    "stimulus": task.stimulus,
+                    "options": task.options,
+                }
+                for task in accepted
+            ]
+            replacements = self.ai_provider.generate_tasks(
+                module_title=module_title,
+                module_scope=module_scope,
+                materials=materials,
+                knowledge_profiles=knowledge_profiles,
+                recent_history=recent_history,
+                session_kind=session_kind,
+                task_count=len(duplicate_indexes),
+                avoid_tasks=avoid_tasks,
+            ).tasks
+            if len(replacements) != len(duplicate_indexes):
+                raise ValueError(
+                    "Не удалось заменить дубли: AI вернул "
+                    f"{len(replacements)} заданий вместо {len(duplicate_indexes)}."
+                )
+            for index, replacement in zip(duplicate_indexes, replacements):
+                repaired[index] = replacement
+
+        return repaired
 
     def grade_task(self, task_id: str, user_answer: Any) -> GradingResult:
         task = self.repository.get_task(task_id)

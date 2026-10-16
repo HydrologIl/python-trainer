@@ -8,7 +8,10 @@ from learning_app.domain import GradingResult, TaskFormat, Verdict
 
 
 def _normalize_text(value: Any) -> str:
-    text = str(value or "").strip().casefold()
+    # ``False`` is a meaningful deterministic answer. Using ``value or ""``
+    # erased it and made every false true/false answer impossible to match.
+    text = "" if value is None else str(value)
+    text = text.strip().casefold()
     return re.sub(r"\s+", " ", text)
 
 

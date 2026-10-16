@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
 from typing import Iterable
 
 from learning_app.domain import LOCALLY_GRADED_FORMATS, TaskDraft, TaskFormat
@@ -17,6 +16,34 @@ THEORY_FORMATS = {
 }
 
 
+def _signature_text(value: str) -> str:
+    return " ".join(value.split()).casefold()
+
+
+def task_signature(task: TaskDraft) -> tuple[str, str, tuple[str, ...]]:
+    """Return the content that makes two generated tasks true duplicates."""
+
+    return (
+        _signature_text(task.prompt),
+        _signature_text(task.stimulus),
+        tuple(sorted(_signature_text(option) for option in task.options)),
+    )
+
+
+def duplicate_task_indexes(tasks: Iterable[TaskDraft]) -> list[int]:
+    """Return every duplicate position after the first copy of each task."""
+
+    seen: set[tuple[str, str, tuple[str, ...]]] = set()
+    duplicates: list[int] = []
+    for index, task in enumerate(tasks):
+        signature = task_signature(task)
+        if signature in seen:
+            duplicates.append(index)
+        else:
+            seen.add(signature)
+    return duplicates
+
+
 def validate_task_batch(
     tasks: Iterable[TaskDraft],
     expected_count: int,
@@ -28,10 +55,13 @@ def validate_task_batch(
     if len(normalized) != expected_count:
         errors.append(f"Получено {len(normalized)} заданий вместо {expected_count}.")
 
-    prompts = Counter(task.prompt.strip().casefold() for task in normalized)
-    duplicate_prompts = [prompt for prompt, count in prompts.items() if count > 1]
-    if duplicate_prompts:
-        errors.append(f"Найдены повторяющиеся условия: {len(duplicate_prompts)}.")
+    duplicate_indexes = duplicate_task_indexes(normalized)
+    if duplicate_indexes:
+        task_numbers = ", ".join(str(index + 1) for index in duplicate_indexes)
+        errors.append(
+            "Найдены полностью повторяющиеся задания: "
+            f"{len(duplicate_indexes)} (номера: {task_numbers})."
+        )
 
     for index, task in enumerate(normalized, start=1):
         unknown = set(task.knowledge_client_ids) - allowed_knowledge_ids

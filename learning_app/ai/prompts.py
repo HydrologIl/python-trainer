@@ -54,6 +54,7 @@ def build_task_generation_prompt(
     recent_history: list[dict[str, Any]],
     session_kind: str,
     task_count: int,
+    avoid_tasks: list[dict[str, Any]] | None = None,
 ) -> tuple[str, str]:
     profile_rows = [profile.model_dump(mode="json") for profile in knowledge_profiles]
     session_rules = (
@@ -62,9 +63,16 @@ def build_task_generation_prompt(
         if session_kind == "recovery"
         else "Это регулярное повторение: обеспечь широкое покрытие модуля и усили слабые места."
     )
+    replacement_rules = ""
+    if avoid_tasks:
+        replacement_rules = (
+            " Это запрос на замену обнаруженных полных дублей. Не повторяй ни одну "
+            "комбинацию prompt, stimulus и options из списка tasks_to_avoid; создай "
+            "только новые задания."
+        )
     system = SYSTEM_GUARDRAIL + f"""
 
-Сгенерируй ровно {task_count} учебных элементов. {session_rules}
+Сгенерируй ровно {task_count} учебных элементов. {session_rules}{replacement_rules}
 
 Правила:
 - используй только переданные knowledge client IDs;
@@ -99,6 +107,10 @@ def build_task_generation_prompt(
 <untrusted_recent_history>
 {_json(recent_history[-30:])}
 </untrusted_recent_history>
+
+<tasks_to_avoid>
+{_json(avoid_tasks or [])}
+</tasks_to_avoid>
 """.strip()
     return system, user
 

@@ -34,6 +34,7 @@ class AIProvider(ABC):
         recent_history: list[dict[str, Any]],
         session_kind: str,
         task_count: int,
+        avoid_tasks: list[dict[str, Any]] | None = None,
     ) -> TaskBatch:
         raise NotImplementedError
 

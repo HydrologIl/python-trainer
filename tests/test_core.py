@@ -83,6 +83,11 @@ class GradingTests(unittest.TestCase):
     def test_practical_requires_ai(self) -> None:
         self.assertIsNone(grade_locally("write_code", None, "print('ok')"))
 
+    def test_boolean_false_matches_russian_false_answer(self) -> None:
+        result = grade_locally("true_false", False, "Неверно")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.verdict.value, "correct")
+
 
 class ValidationTests(unittest.TestCase):
     def test_valid_batch_is_sorted_by_difficulty(self) -> None:
@@ -116,6 +121,41 @@ class ValidationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "неизвест"):
             validate_task_batch([task], expected_count=1, allowed_knowledge_ids={"k1"})
+
+    def test_same_prompt_with_different_stimulus_is_not_a_duplicate(self) -> None:
+        tasks = [
+            TaskDraft(
+                format=TaskFormat.OUTPUT_PREDICTION,
+                difficulty=1,
+                prompt="Что выведет код?",
+                stimulus=code,
+                answer_guidance="Сравнить вывод.",
+                knowledge_client_ids=["k1"],
+            )
+            for code in ("print(1)", "print(2)")
+        ]
+
+        result = validate_task_batch(tasks, expected_count=2, allowed_knowledge_ids={"k1"})
+
+        self.assertEqual(len(result), 2)
+
+    def test_same_prompt_stimulus_and_options_is_a_duplicate(self) -> None:
+        task = TaskDraft(
+            format=TaskFormat.SINGLE_CHOICE,
+            difficulty=1,
+            prompt="Выберите ответ",
+            stimulus="x = 1",
+            options=["1", "2"],
+            correct_answer="1",
+            knowledge_client_ids=["k1"],
+        )
+
+        with self.assertRaisesRegex(ValueError, "полностью повторяющиеся"):
+            validate_task_batch(
+                [task, task.model_copy(deep=True)],
+                expected_count=2,
+                allowed_knowledge_ids={"k1"},
+            )
 
 
 class RetryTests(unittest.TestCase):
