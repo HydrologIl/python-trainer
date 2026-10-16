@@ -49,6 +49,7 @@ class FakeProvider(AIProvider):
         session_kind,
         task_count,
         avoid_tasks=None,
+        task_feedback=None,
     ):
         return TaskBatch(
             tasks=[
@@ -83,6 +84,7 @@ class DuplicateRepairProvider(FakeProvider):
         session_kind,
         task_count,
         avoid_tasks=None,
+        task_feedback=None,
     ):
         self.requested_counts.append(task_count)
         self.avoid_task_counts.append(len(avoid_tasks or []))

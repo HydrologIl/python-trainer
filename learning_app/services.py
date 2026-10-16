@@ -88,6 +88,7 @@ class LearningService:
             for material in materials
         ]
         recent_history = self.repository.get_recent_history(module.id)
+        task_feedback = self.repository.get_recent_task_feedback(module.id)
         try:
             batch = self.ai_provider.generate_tasks(
                 module_title=module.title,
@@ -97,6 +98,7 @@ class LearningService:
                 recent_history=recent_history,
                 session_kind=assignment.kind,
                 task_count=assignment.task_count,
+                task_feedback=task_feedback,
             )
             repaired_tasks = self._replace_duplicate_tasks(
                 tasks=list(batch.tasks),
@@ -106,6 +108,7 @@ class LearningService:
                 knowledge_profiles=profiles,
                 recent_history=recent_history,
                 session_kind=assignment.kind,
+                task_feedback=task_feedback,
             )
             tasks = validate_task_batch(
                 repaired_tasks,
@@ -138,6 +141,7 @@ class LearningService:
         knowledge_profiles: list[KnowledgeProfile],
         recent_history: list[dict[str, Any]],
         session_kind: str,
+        task_feedback: list[dict[str, Any]],
         max_repair_rounds: int = 3,
     ) -> list[TaskDraft]:
         repaired = list(tasks)
@@ -167,6 +171,7 @@ class LearningService:
                 session_kind=session_kind,
                 task_count=len(duplicate_indexes),
                 avoid_tasks=avoid_tasks,
+                task_feedback=task_feedback,
             ).tasks
             if len(replacements) != len(duplicate_indexes):
                 raise ValueError(

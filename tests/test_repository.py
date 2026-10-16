@@ -197,6 +197,17 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(restored.id, latest.id)
         self.assertEqual(restored.user_answer, "Неверно")
 
+        self.repository.add_task_feedback(
+            task.id,
+            "ошибка в условии",
+            "Не хватает данных для ответа.",
+        )
+        feedback = self.repository.get_recent_task_feedback(self.module.id)
+        self.assertEqual(len(feedback), 1)
+        self.assertEqual(feedback[0]["task_prompt"], "Верно?")
+        self.assertEqual(feedback[0]["issue_type"], "ошибка в условии")
+        self.assertEqual(feedback[0]["comment"], "Не хватает данных для ответа.")
+
 
 if __name__ == "__main__":
     unittest.main()

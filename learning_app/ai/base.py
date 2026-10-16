@@ -35,6 +35,7 @@ class AIProvider(ABC):
         session_kind: str,
         task_count: int,
         avoid_tasks: list[dict[str, Any]] | None = None,
+        task_feedback: list[dict[str, Any]] | None = None,
     ) -> TaskBatch:
         raise NotImplementedError
 

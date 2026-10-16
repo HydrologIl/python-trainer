@@ -743,3 +743,29 @@ class LearningRepository:
             }
             for attempt, task in reversed(rows)
         ]
+
+    def get_recent_task_feedback(
+        self,
+        module_id: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        with self._sessions() as session:
+            rows = session.execute(
+                select(TaskFeedback, Task)
+                .join(Task, Task.id == TaskFeedback.task_id)
+                .where(Task.module_id == module_id)
+                .order_by(TaskFeedback.created_at.desc())
+                .limit(limit)
+            ).all()
+        return [
+            {
+                "task_format": task.format,
+                "task_prompt": task.prompt,
+                "task_stimulus": task.stimulus,
+                "task_options": task.options,
+                "issue_type": feedback.issue_type,
+                "comment": feedback.comment,
+                "created_at": feedback.created_at.isoformat(),
+            }
+            for feedback, task in reversed(rows)
+        ]

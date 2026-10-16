@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from learning_app.ai.prompts import build_grading_prompt
+from learning_app.ai.prompts import build_grading_prompt, build_task_generation_prompt
 
 
 class GradingPromptTests(unittest.TestCase):
@@ -29,6 +29,32 @@ class GradingPromptTests(unittest.TestCase):
 
         self.assertIn("Тип ввода: структурированное значение JSON", user)
         self.assertIn('"a": "b"', user)
+
+
+class TaskGenerationPromptTests(unittest.TestCase):
+    def test_recent_task_complaints_are_included_as_defects_to_avoid(self) -> None:
+        system, user = build_task_generation_prompt(
+            module_title="Функции",
+            module_scope="Списки и функции",
+            materials=[],
+            knowledge_profiles=[],
+            recent_history=[],
+            session_kind="regular",
+            task_count=10,
+            task_feedback=[
+                {
+                    "task_format": "matching",
+                    "task_prompt": "Сопоставь приём с назначением функции.",
+                    "issue_type": "ошибка в условии",
+                    "comment": "Не показаны элементы для сопоставления.",
+                }
+            ],
+        )
+
+        self.assertIn("не повторяй такой же дефект", system)
+        self.assertIn("<past_task_feedback>", user)
+        self.assertIn("Сопоставь приём с назначением функции.", user)
+        self.assertIn("Не показаны элементы для сопоставления.", user)
 
 
 if __name__ == "__main__":
