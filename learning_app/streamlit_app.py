@@ -344,7 +344,20 @@ def render_session(
         return
 
     index_key = f"task_index_{session_id}"
-    index = min(st.session_state.get(index_key, 0), len(tasks) - 1)
+    initialized_key = f"task_navigation_initialized_{session_id}"
+    first_unfinished = next(
+        (
+            task_index
+            for task_index, candidate in enumerate(tasks)
+            if candidate.status not in {"correct", "abandoned", "bad_task"}
+        ),
+        len(tasks) - 1,
+    )
+    if not st.session_state.get(initialized_key):
+        index = first_unfinished
+        st.session_state[initialized_key] = True
+    else:
+        index = min(st.session_state.get(index_key, first_unfinished), len(tasks) - 1)
     st.session_state[index_key] = index
     completed = sum(task.status in {"correct", "abandoned", "bad_task"} for task in tasks)
     st.progress(completed / len(tasks))
@@ -357,7 +370,9 @@ def render_session(
     if task.stimulus:
         st.code(task.stimulus)
 
-    answer = render_answer_input(task)
+    latest_attempt = repository.get_latest_attempt(task.id)
+    previous_answer = latest_attempt.user_answer if latest_attempt else None
+    answer = render_answer_input(task, previous_answer)
     col_prev, col_submit, col_skip, col_next = st.columns(4)
     with col_prev:
         if st.button("← Назад", disabled=index == 0, key=f"prev_{task.id}"):
@@ -387,6 +402,11 @@ def render_session(
             st.rerun()
 
     result = st.session_state.get(f"result_{task.id}")
+    if result is None and latest_attempt is not None:
+        result = {
+            "verdict": latest_attempt.verdict,
+            "feedback": latest_attempt.feedback,
+        }
     if result:
         if result["verdict"] == "correct":
             st.success(result["feedback"])
@@ -409,26 +429,79 @@ def render_session(
             st.rerun()
 
 
-def render_answer_input(task: Task) -> Any:
+def _text_answer(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    return str(value)
+
+
+def _option_index(options: list[str], value: Any) -> int | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().casefold()
+    return next(
+        (
+            index
+            for index, option in enumerate(options)
+            if option.strip().casefold() == normalized
+        ),
+        None,
+    )
+
+
+def render_answer_input(task: Task, previous_answer: Any = None) -> Any:
     key = f"answer_{task.id}"
     if task.format == "single_choice":
-        return st.radio("Ответ", task.options, key=key, index=None)
+        return st.radio(
+            "Ответ",
+            task.options,
+            key=key,
+            index=_option_index(task.options, previous_answer),
+        )
     if task.format == "multiple_choice":
-        return st.multiselect("Ответ", task.options, key=key)
+        selected = previous_answer if isinstance(previous_answer, list) else []
+        return st.multiselect(
+            "Ответ",
+            task.options,
+            default=[item for item in selected if item in task.options],
+            key=key,
+        )
     if task.format == "true_false":
-        return st.radio("Ответ", ["Верно", "Неверно"], key=key, index=None)
+        true_false_options = ["Верно", "Неверно"]
+        if isinstance(previous_answer, bool):
+            previous_answer = "Верно" if previous_answer else "Неверно"
+        return st.radio(
+            "Ответ",
+            true_false_options,
+            key=key,
+            index=_option_index(true_false_options, previous_answer),
+        )
     if task.format == "ordering":
-        value = st.text_area("Порядок — один пункт на строку", key=key)
+        default = (
+            "\n".join(str(item) for item in previous_answer)
+            if isinstance(previous_answer, list)
+            else _text_answer(previous_answer)
+        )
+        value = st.text_area("Порядок — один пункт на строку", value=default, key=key)
         return [line.strip() for line in value.splitlines() if line.strip()]
     if task.format == "matching":
         value = st.text_area(
-            "Соответствия в JSON, например {\"термин\": \"определение\"}", key=key
+            "Соответствия в JSON, например {\"термин\": \"определение\"}",
+            value=_text_answer(previous_answer),
+            key=key,
         )
         try:
             return json.loads(value) if value.strip() else {}
         except json.JSONDecodeError:
             return value
-    return st.text_area("Ответ", height=220, key=key)
+    return st.text_area(
+        "Ответ",
+        value=_text_answer(previous_answer),
+        height=220,
+        key=key,
+    )
 
 
 def render_progress(repository: LearningRepository) -> None:

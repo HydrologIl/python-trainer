@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
@@ -143,6 +143,59 @@ class RepositoryTests(unittest.TestCase):
         self.assertFalse(self.repository.complete_session_if_ready(review.id))
         self.repository.set_task_status(stored.id, "abandoned")
         self.assertTrue(self.repository.complete_session_if_ready(review.id))
+
+    def test_latest_attempt_preserves_the_last_answer(self) -> None:
+        mapping = self.repository.upsert_knowledge_items(
+            self.module.id,
+            [
+                KnowledgeItemDraft(
+                    client_id="k1",
+                    kind=KnowledgeKind.THEORY,
+                    title="Факт",
+                    description="Описание",
+                )
+            ],
+        )
+        self.repository.mark_module_studied(self.module.id, date(2026, 10, 1))
+        assignment = self.repository.list_due_assignments(date(2026, 10, 2))[0]
+        assignment.task_count = 1
+        with self.repository.transaction() as session:
+            session.merge(assignment)
+        review = self.repository.create_session_with_tasks(
+            assignment.id,
+            [
+                TaskDraft(
+                    format=TaskFormat.TRUE_FALSE,
+                    difficulty=1,
+                    prompt="Верно?",
+                    correct_answer=False,
+                    knowledge_client_ids=["k1"],
+                )
+            ],
+            mapping,
+            provider="fake",
+            model="fake",
+        )
+        task = self.repository.list_tasks(review.id)[0]
+        self.repository.add_attempt(
+            task.id,
+            "Верно",
+            "incorrect",
+            "Ошибка",
+            created_at=datetime(2026, 10, 2, 10, 0),
+        )
+        latest = self.repository.add_attempt(
+            task.id,
+            "Неверно",
+            "correct",
+            "Верно.",
+            created_at=datetime(2026, 10, 2, 10, 1),
+        )
+
+        restored = self.repository.get_latest_attempt(task.id)
+
+        self.assertEqual(restored.id, latest.id)
+        self.assertEqual(restored.user_answer, "Неверно")
 
 
 if __name__ == "__main__":

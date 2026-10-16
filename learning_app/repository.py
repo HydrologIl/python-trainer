@@ -582,6 +582,15 @@ class LearningRepository:
         with self._sessions() as session:
             return session.get(Task, task_id)
 
+    def get_latest_attempt(self, task_id: str) -> Optional[Attempt]:
+        with self._sessions() as session:
+            return session.scalar(
+                select(Attempt)
+                .where(Attempt.task_id == task_id)
+                .order_by(Attempt.created_at.desc(), Attempt.id.desc())
+                .limit(1)
+            )
+
     def get_knowledge_items_by_ids(self, knowledge_ids: list[str]) -> list[KnowledgeItem]:
         if not knowledge_ids:
             return []
