@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
@@ -238,6 +239,47 @@ class LearningServiceTests(unittest.TestCase):
         ]
         self.assertEqual(len(recovery), 1)
         self.assertEqual(recovery[0].task_count, 15)
+
+    def test_error_in_recovery_does_not_schedule_another_recovery(self) -> None:
+        self.service.analyze_module(self.module.id)
+        today = date.today()
+        self.repository.mark_module_studied(self.module.id, today - timedelta(days=1))
+        regular_assignment = next(
+            item
+            for item in self.repository.list_due_assignments(today)
+            if item.repetition_day == 1
+        )
+        regular_session = self.service.generate_assignment(regular_assignment.id)
+        regular_task = next(
+            task
+            for task in self.repository.list_tasks(regular_session.id)
+            if task.format == TaskFormat.SINGLE_CHOICE.value
+        )
+        self.service.grade_task(regular_task.id, "unique")
+
+        tomorrow = today + timedelta(days=1)
+        recovery_assignment = next(
+            item
+            for item in self.repository.list_due_assignments(tomorrow)
+            if item.kind == "recovery"
+        )
+        recovery_session = self.service.generate_assignment(recovery_assignment.id)
+        recovery_task = next(
+            task
+            for task in self.repository.list_tasks(recovery_session.id)
+            if task.format == TaskFormat.SINGLE_CHOICE.value
+        )
+        with patch.object(self.service, "_today", return_value=tomorrow):
+            result = self.service.grade_task(recovery_task.id, "unique")
+
+        self.assertEqual(result.verdict.value, "incorrect")
+        recoveries = [
+            item
+            for item in self.repository.list_due_assignments(tomorrow + timedelta(days=1))
+            if item.kind == "recovery"
+        ]
+        self.assertEqual(len(recoveries), 1)
+        self.assertEqual(recoveries[0].scheduled_date, tomorrow)
 
     def test_only_complete_duplicates_are_regenerated(self) -> None:
         provider = DuplicateRepairProvider()

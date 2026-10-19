@@ -5,7 +5,13 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from learning_app.ai.base import AIProvider
-from learning_app.domain import GradingResult, KnowledgeKind, KnowledgeProfile, TaskDraft
+from learning_app.domain import (
+    GradingResult,
+    KnowledgeKind,
+    KnowledgeProfile,
+    SessionKind,
+    TaskDraft,
+)
 from learning_app.grading import grade_locally
 from learning_app.mastery import calculate_mastery, generation_weight
 from learning_app.repository import LearningRepository, ReviewSession, Task
@@ -195,6 +201,7 @@ class LearningService:
         task = self.repository.get_task(task_id)
         if task is None:
             raise ValueError("Задание не найдено.")
+        review_session = self.repository.get_review_session(task.session_id)
 
         result = grade_locally(task.format, task.correct_answer, user_answer)
         if result is None:
@@ -223,7 +230,9 @@ class LearningService:
             error_summary=result.error_summary,
         )
 
-        if result.verdict.value != "correct":
+        if result.verdict.value != "correct" and (
+            review_session is None or review_session.kind != SessionKind.RECOVERY.value
+        ):
             self._schedule_recovery(task.module_id)
         self.repository.complete_session_if_ready(task.session_id)
         return result
