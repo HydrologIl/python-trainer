@@ -30,16 +30,26 @@ class XAIProvider(AIProvider):
         self.model = model
         self._client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
 
-    def _parse(self, schema: type[Any], system_text: str, user_text: str) -> Any:
+    def _parse(
+        self,
+        schema: type[Any],
+        system_text: str,
+        user_text: str,
+        reasoning_effort: str | None = None,
+    ) -> Any:
+        request: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_text},
+                {"role": "user", "content": user_text},
+            ],
+            "response_format": schema,
+        }
+        if reasoning_effort is not None:
+            request["reasoning_effort"] = reasoning_effort
+
         completion = call_with_transient_retry(
-            lambda: self._client.beta.chat.completions.parse(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_text},
-                    {"role": "user", "content": user_text},
-                ],
-                response_format=schema,
-            )
+            lambda: self._client.beta.chat.completions.parse(**request)
         )
         parsed = completion.choices[0].message.parsed
         if parsed is None:
@@ -93,4 +103,9 @@ class XAIProvider(AIProvider):
         system_text, user_text = build_grading_prompt(
             task, user_answer, knowledge_context
         )
-        return self._parse(GradingResult, system_text, user_text)
+        return self._parse(
+            GradingResult,
+            system_text,
+            user_text,
+            reasoning_effort="low",
+        )
